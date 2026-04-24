@@ -124,7 +124,6 @@ interface RawStatement {
 function parseImport(stmt: RawStatement): ParsedImport | null {
   const trimmed = stmt.raw.trim();
   const leadingComments = stmt.leadingComments;
-
   const sideEffect = /^import\s*(['"])([^'"]+)\1\s*;?$/.exec(trimmed);
 
   if (sideEffect) {
@@ -139,9 +138,8 @@ function parseImport(stmt: RawStatement): ParsedImport | null {
       leadingComments,
     };
   }
-
   const m =
-    /^import\s+(type\s+)?([\s\S]+?)\s+from\s*(['"])([^'"]+)\3\s*;?$/.exec(
+    /^import\s+(type\s+)?([\s\S]+?)\s*from\s*(['"])([^'"]+)\3\s*;?$/.exec(
       trimmed,
     );
 
@@ -512,6 +510,9 @@ export function sortImports(text: string, rawOptions: ParserOptions): string {
     prevGroup = item.group;
   }
   const replacement = lines.join('\n');
+  const trailing = text.slice(block.end);
+  // 当 import 块后还有其他代码时，保证两者之间始终有一个空行。
+  const suffix = trailing.trim() ? '\n\n' + trailing.trimStart() : trailing;
 
-  return text.slice(0, block.start) + replacement + text.slice(block.end);
+  return text.slice(0, block.start) + replacement + suffix;
 }
