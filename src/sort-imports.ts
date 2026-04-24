@@ -67,7 +67,6 @@ interface Member {
 }
 
 interface ParsedImport {
-  raw: string;
   source: string;
   /** 整条语句是 `import type { … }`。 */
   typeClause: boolean;
@@ -84,12 +83,15 @@ interface ParsedImport {
   leadingComments: string;
 }
 
+const TYPE_PREFIX = /^type\s+(.+)$/s;
+
 function splitMembers(inner: string): Member[] {
   return splitTopLevel(inner, ',').map<Member>(part => {
-    const isType = /^type\s+/.test(part);
-    const name = isType ? part.replace(/^type\s+/, '').trim() : part;
+    const match = TYPE_PREFIX.exec(part);
 
-    return { name, isType };
+    return match
+      ? { name: match[1]!.trim(), isType: true }
+      : { name: part, isType: false };
   });
 }
 
@@ -106,7 +108,6 @@ function parseImport(stmt: RawStatement): ParsedImport | null {
 
   if (sideEffect) {
     return {
-      raw: trimmed,
       source: sideEffect[2] ?? '',
       typeClause: false,
       sideEffect: true,
@@ -146,7 +147,6 @@ function parseImport(stmt: RawStatement): ParsedImport | null {
   }
 
   return {
-    raw: trimmed,
     source,
     typeClause,
     sideEffect: false,
@@ -325,7 +325,6 @@ function mergeImportsFromSameSource(imports: ParsedImport[]): ParsedImport[] {
 
     // 两条中最多只有一条能合法地带 defaultSpec / namespaceSpec / attributes，冲突时以首条为准。
     result[existingIndex] = {
-      raw: '',
       source: existing.source,
       typeClause: false,
       sideEffect: false,
@@ -369,7 +368,6 @@ function applyTypeImports(
 
     if (typeMembers.length > 0) {
       out.push({
-        raw: '',
         source: importDecl.source,
         typeClause: true,
         sideEffect: false,

@@ -108,7 +108,7 @@ export function sortPackageJson(
   if (!isPlainObject(parsed)) {
     return text;
   }
-  let result: Record<string, JsonValue> = { ...parsed };
+  let result: Record<string, JsonValue> = parsed;
 
   // 依赖表始终按字母序排列，与用户选项无关—— npm install 每次都会按字母序写回。
   for (const field of DEPENDENCY_FIELDS) {
