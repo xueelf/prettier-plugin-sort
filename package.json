@@ -12,6 +12,14 @@
     "prettier-plugin",
     "sort"
   ],
+  "homepage": "https://github.com/xueelf/prettier-plugin-sort",
+  "bugs": {
+    "url": "https://github.com/xueelf/prettier-plugin-sort/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/xueelf/prettier-plugin-sort.git"
+  },
   "license": "MIT",
   "author": "Yuki <admin@yuki.sh>",
   "type": "module",
