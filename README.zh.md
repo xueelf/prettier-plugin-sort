@@ -185,6 +185,35 @@ import { useEffect, useState } from 'react';
 
 如果你希望保留原本分离的两条语句，把 `importOrderMergeDuplicates` 设为 `false` 即可。副作用导入（`import 'mod';`）因为顺序有语义，永远不会被合并。
 
+#### 副作用导入
+
+副作用导入（`import 'mod'`）的顺序通常有运行时语义，例如 CSS 的层叠顺序、polyfill 必须在框架之前加载等。插件不会跨越副作用导入移动其他 import 语句：
+
+排序前：
+
+<!-- prettier-ignore -->
+```typescript
+import Button from './Button';
+import App from './App';
+import 'normalize.css';
+import theme from './theme';
+import Icon from './Icon';
+```
+
+排序后：
+
+```typescript
+import App from './App';
+import Button from './Button';
+
+import 'normalize.css';
+
+import Icon from './Icon';
+import theme from './theme';
+```
+
+副作用导入两侧的 import 各自独立排序，副作用导入本身保持原位不动。
+
 排序规则：
 
 - import 按分组分类，分组内按字母序排列
@@ -192,7 +221,7 @@ import { useEffect, useState } from 'react';
 - 分组之间默认插入空行，可通过 `importOrderSeparation` 关闭
 - `type` import 默认拆成独立语句，可通过 `importOrderTypeImports` 调整为内联
 - 同一来源的多条 import 默认合并为一条，可通过 `importOrderMergeDuplicates` 关闭
-- 副作用导入（`import 'mod'`）顺序有语义，永远不参与合并或跨位移动
+- 副作用导入（`import 'mod'`）其顺序有语义，不会被移动，两侧的 import 各自独立排序
 
 ### export
 
