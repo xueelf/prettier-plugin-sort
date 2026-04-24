@@ -100,9 +100,9 @@ interface RawStatement {
   leadingComments: string;
 }
 
-function parseImport(stmt: RawStatement): ParsedImport | null {
-  const trimmed = stmt.raw.trim();
-  const leadingComments = stmt.leadingComments;
+function parseImport(statement: RawStatement): ParsedImport | null {
+  const trimmed = statement.raw.trim();
+  const leadingComments = statement.leadingComments;
   const sideEffect =
     /^import\s*(['"])([^'"]+)\1(?:\s+with\s*(\{[^}]*\}))?\s*;?$/.exec(trimmed);
 
@@ -118,18 +118,18 @@ function parseImport(stmt: RawStatement): ParsedImport | null {
       leadingComments,
     };
   }
-  const m =
+  const match =
     /^import\s+(type\s+)?([\s\S]+?)\s*from\s*(['"])([^'"]+)\3(?:\s+with\s*(\{[^}]*\}))?\s*;?$/.exec(
       trimmed,
     );
 
-  if (!m) {
+  if (!match) {
     return null;
   }
-  const typeClause = Boolean(m[1]);
-  const clause = (m[2] ?? '').trim();
-  const source = m[4] ?? '';
-  const attributes = m[5] ?? null;
+  const typeClause = Boolean(match[1]);
+  const clause = (match[2] ?? '').trim();
+  const source = match[4] ?? '';
+  const attributes = match[5] ?? null;
 
   let defaultSpec: string | null = null;
   let namespaceSpec: string | null = null;
@@ -298,8 +298,8 @@ function mergeImportsFromSameSource(imports: ParsedImport[]): ParsedImport[] {
   const indexBySource = new Map<string, number>();
   const result: ParsedImport[] = [];
 
-  for (const raw of imports) {
-    const importDecl = normalizeTypeClause(raw);
+  for (const rawImport of imports) {
+    const importDecl = normalizeTypeClause(rawImport);
 
     // 副作用导入以及 `import type X` / `import type * as X` 这类无法与普通 import 在同一语句里
     // 表达 type 修饰的形式，保持独立，不参与合并。
@@ -393,7 +393,7 @@ function applyTypeImports(
 
   // inline 模式：将 `import type { X, Y }` 改写为 `import { type X, type Y }`。
   // 所有成员标记为 type 后，inline-first / inline-last 的内部排序逻辑一致。
-  const base: ImportWithMembers = importDecl.typeClause
+  const inlineBase: ImportWithMembers = importDecl.typeClause
     ? {
         ...importDecl,
         typeClause: false,
@@ -405,11 +405,11 @@ function applyTypeImports(
     : { ...importDecl, members: importDecl.members };
 
   if (style === 'mixed') {
-    return [{ ...base, members: sortMembersAlpha(base.members) }];
+    return [{ ...inlineBase, members: sortMembersAlpha(inlineBase.members) }];
   }
 
-  const typeMembers = base.members.filter(m => m.isType);
-  const valueMembers = base.members.filter(m => !m.isType);
+  const typeMembers = inlineBase.members.filter(member => member.isType);
+  const valueMembers = inlineBase.members.filter(member => !member.isType);
   const sortedTypes = sortMembersAlpha(typeMembers);
   const sortedValues = sortMembersAlpha(valueMembers);
   const ordered =
@@ -417,7 +417,7 @@ function applyTypeImports(
       ? [...sortedTypes, ...sortedValues]
       : [...sortedValues, ...sortedTypes];
 
-  return [{ ...base, members: ordered }];
+  return [{ ...inlineBase, members: ordered }];
 }
 
 /**
@@ -441,7 +441,7 @@ function sortSegment(
     applyTypeImports(importDecl, style),
   );
   const decorated = rewritten.map((importDecl, index) => ({
-    stmt: importDecl,
+    importDecl,
     group: detectGroup(importDecl.source),
     originalIndex: index,
   }));
@@ -453,32 +453,32 @@ function sortSegment(
     if (groupOrderA !== groupOrderB) {
       return groupOrderA - groupOrderB;
     }
-    const sourceA = a.stmt.source.toLowerCase();
-    const sourceB = b.stmt.source.toLowerCase();
+    const sourceA = a.importDecl.source.toLowerCase();
+    const sourceB = b.importDecl.source.toLowerCase();
 
     if (sourceA !== sourceB) {
       return sourceA < sourceB ? -1 : 1;
     }
     // 同一来源内，type-only 部分优先。
-    if (a.stmt.typeClause !== b.stmt.typeClause) {
-      return a.stmt.typeClause ? -1 : 1;
+    if (a.importDecl.typeClause !== b.importDecl.typeClause) {
+      return a.importDecl.typeClause ? -1 : 1;
     }
     return a.originalIndex - b.originalIndex;
   });
 
   const lines: string[] = [];
-  let prevGroup: ImportGroup | null = null;
+  let previousGroup: ImportGroup | null = null;
 
   for (const item of decorated) {
     if (
       options.importOrderSeparation &&
-      prevGroup !== null &&
-      item.group !== prevGroup
+      previousGroup !== null &&
+      item.group !== previousGroup
     ) {
       lines.push('');
     }
-    lines.push(renderImport(item.stmt));
-    prevGroup = item.group;
+    lines.push(renderImport(item.importDecl));
+    previousGroup = item.group;
   }
   return lines;
 }
@@ -495,8 +495,8 @@ export function sortImports(text: string, rawOptions: ParserOptions): string {
     return text;
   }
   const parsed = block.statements
-    .map(rawStmt => parseImport(rawStmt))
-    .filter((decl): decl is ParsedImport => decl !== null);
+    .map(rawStatement => parseImport(rawStatement))
+    .filter((importDecl): importDecl is ParsedImport => importDecl !== null);
 
   if (parsed.length === 0) {
     return text;
@@ -514,7 +514,7 @@ export function sortImports(text: string, rawOptions: ParserOptions): string {
   // 副作用导入本身保持原位不移动，遵循社区关于副作用 import 顺序有语义的共识。
   type Chunk =
     | { kind: 'segment'; imports: ParsedImport[] }
-    | { kind: 'side-effect'; stmt: ParsedImport };
+    | { kind: 'side-effect'; importDecl: ParsedImport };
 
   const chunks: Chunk[] = [];
   let currentSegment: ParsedImport[] = [];
@@ -522,7 +522,7 @@ export function sortImports(text: string, rawOptions: ParserOptions): string {
   for (const importDecl of parsed) {
     if (importDecl.sideEffect) {
       chunks.push({ kind: 'segment', imports: currentSegment });
-      chunks.push({ kind: 'side-effect', stmt: importDecl });
+      chunks.push({ kind: 'side-effect', importDecl });
       currentSegment = [];
     } else {
       currentSegment.push(importDecl);
@@ -557,7 +557,7 @@ export function sortImports(text: string, rawOptions: ParserOptions): string {
       if (previousKind === 'segment' && options.importOrderSeparation) {
         allLines.push('');
       }
-      allLines.push(renderImport(chunk.stmt));
+      allLines.push(renderImport(chunk.importDecl));
       previousKind = 'side-effect';
     }
   }

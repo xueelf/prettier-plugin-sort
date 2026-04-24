@@ -32,9 +32,11 @@ export function sortExports(text: string, rawOptions: ParserOptions): string {
           sensitivity: 'base',
         }),
       );
-      const same = sorted.every((m, i) => m === members[i]);
+      const unchanged = sorted.every(
+        (member, index) => member === members[index],
+      );
 
-      if (same) {
+      if (unchanged) {
         return match;
       }
       const prefix = typeKeyword ? `export${typeKeyword}` : 'export';

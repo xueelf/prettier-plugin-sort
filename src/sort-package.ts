@@ -51,11 +51,8 @@ function sortObjectKeysByOrder(
       rest.push(entry);
     }
   }
-  known.sort(
-    ([left], [right]) =>
-      (orderIndex.get(left) ?? 0) - (orderIndex.get(right) ?? 0),
-  );
-  rest.sort(([left], [right]) => left.localeCompare(right, 'en'));
+  known.sort(([a], [b]) => (orderIndex.get(a) ?? 0) - (orderIndex.get(b) ?? 0));
+  rest.sort(([a], [b]) => a.localeCompare(b, 'en'));
 
   return Object.fromEntries([...known, ...rest]);
 }
@@ -65,9 +62,7 @@ function sortObjectKeysAlpha(value: JsonValue): JsonValue {
     return value;
   }
   return Object.fromEntries(
-    Object.entries(value).sort(([left], [right]) =>
-      left.localeCompare(right, 'en'),
-    ),
+    Object.entries(value).sort(([a], [b]) => a.localeCompare(b, 'en')),
   );
 }
 
