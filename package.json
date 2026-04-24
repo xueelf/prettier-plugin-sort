@@ -1,0 +1,62 @@
+{
+  "name": "prettier-plugin-sort",
+  "version": "0.0.1",
+  "description": "An all-in-one Prettier plugin to sort imports, package.json keys, and more.",
+  "keywords": [
+    "imports",
+    "order",
+    "organize",
+    "package.json",
+    "plugin",
+    "prettier",
+    "prettier-plugin",
+    "sort"
+  ],
+  "license": "MIT",
+  "author": "Yuki <admin@yuki.sh>",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "bun run scripts/build/index.ts",
+    "format": "prettier \"{src,scripts}/**/*.ts\" \"*.ts\" --write",
+    "lint": "eslint \"{src,scripts}/**/*.ts\" \"*.ts\"",
+    "prepare": "husky",
+    "test": "bun test"
+  },
+  "devDependencies": {
+    "@commitlint/cli": "^20.5.0",
+    "@commitlint/config-conventional": "^20.5.0",
+    "@commitlint/types": "^20.5.0",
+    "@eslint/js": "^10.0.1",
+    "@types/bun": "^1.3.13",
+    "bun-plugin-dts": "^0.4.0",
+    "eslint": "^10.2.1",
+    "husky": "^9.1.7",
+    "prettier": "^3.8.3",
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.59.0"
+  },
+  "peerDependencies": {
+    "prettier": ">=3.0.0"
+  },
+  "devEngines": {
+    "runtime": {
+      "name": "bun",
+      "onFail": "warn"
+    },
+    "packageManager": {
+      "name": "bun",
+      "onFail": "warn"
+    }
+  }
+}
