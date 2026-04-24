@@ -66,6 +66,16 @@ const isValidTypeStyle = (value: unknown): value is TypeImportsStyle =>
 
 type RawSortOptions = ParserOptions & Partial<SortOptions>;
 
+function resolveBoolean<K extends keyof SortOptions>(
+  rawOptions: RawSortOptions,
+  key: K,
+): boolean {
+  const raw = rawOptions[key];
+  return typeof raw === 'boolean'
+    ? raw
+    : (DEFAULT_SORT_OPTIONS[key] as boolean);
+}
+
 /**
  * 从 Prettier 选项中提取插件配置，为缺失或非法的参数补上默认值。
  */
@@ -82,48 +92,24 @@ export function resolveSortOptions(
       )
     : [];
 
-  const importOrder =
-    typeof rawOptions.importOrder === 'boolean'
-      ? rawOptions.importOrder
-      : DEFAULT_SORT_OPTIONS.importOrder;
-
-  const importOrderGroups =
-    groups.length > 0 ? groups : [...DEFAULT_SORT_OPTIONS.importOrderGroups];
-
-  const importOrderSeparation =
-    typeof rawOptions.importOrderSeparation === 'boolean'
-      ? rawOptions.importOrderSeparation
-      : DEFAULT_SORT_OPTIONS.importOrderSeparation;
-
   const importOrderTypeImports = isValidTypeStyle(
     rawOptions.importOrderTypeImports,
   )
     ? rawOptions.importOrderTypeImports
     : DEFAULT_SORT_OPTIONS.importOrderTypeImports;
 
-  const importOrderMergeDuplicates =
-    typeof rawOptions.importOrderMergeDuplicates === 'boolean'
-      ? rawOptions.importOrderMergeDuplicates
-      : DEFAULT_SORT_OPTIONS.importOrderMergeDuplicates;
-
-  const exportOrder =
-    typeof rawOptions.exportOrder === 'boolean'
-      ? rawOptions.exportOrder
-      : DEFAULT_SORT_OPTIONS.exportOrder;
-
-  const packageJsonOrder =
-    typeof rawOptions.packageJsonOrder === 'boolean'
-      ? rawOptions.packageJsonOrder
-      : DEFAULT_SORT_OPTIONS.packageJsonOrder;
-
   return {
-    importOrder,
-    importOrderGroups,
-    importOrderSeparation,
+    importOrder: resolveBoolean(rawOptions, 'importOrder'),
+    importOrderGroups:
+      groups.length > 0 ? groups : [...DEFAULT_SORT_OPTIONS.importOrderGroups],
+    importOrderSeparation: resolveBoolean(rawOptions, 'importOrderSeparation'),
     importOrderTypeImports,
-    importOrderMergeDuplicates,
-    exportOrder,
-    packageJsonOrder,
+    importOrderMergeDuplicates: resolveBoolean(
+      rawOptions,
+      'importOrderMergeDuplicates',
+    ),
+    exportOrder: resolveBoolean(rawOptions, 'exportOrder'),
+    packageJsonOrder: resolveBoolean(rawOptions, 'packageJsonOrder'),
     packageJsonOrderExcludeKeys: excludeKeys,
   };
 }

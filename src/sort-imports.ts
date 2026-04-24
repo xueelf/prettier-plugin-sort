@@ -521,45 +521,40 @@ export function sortImports(text: string, rawOptions: ParserOptions): string {
 
   for (const importDecl of parsed) {
     if (importDecl.sideEffect) {
-      chunks.push({ kind: 'segment', imports: currentSegment });
+      if (currentSegment.length > 0) {
+        chunks.push({ kind: 'segment', imports: currentSegment });
+        currentSegment = [];
+      }
       chunks.push({ kind: 'side-effect', importDecl });
-      currentSegment = [];
     } else {
       currentSegment.push(importDecl);
     }
   }
-  chunks.push({ kind: 'segment', imports: currentSegment });
+  if (currentSegment.length > 0) {
+    chunks.push({ kind: 'segment', imports: currentSegment });
+  }
 
   const allLines: string[] = [];
-  // 追踪上一个写入的 chunk 类型，用于判断是否插入空行：
-  // 连续的副作用导入之间保持相邻，不插入空行。
-  // 副作用导入与前后的 segment 之间才受 importOrderSeparation 控制。
-  let previousKind: 'segment' | 'side-effect' | null = null;
+  // segment 和副作用导入之间插空行，但连续的副作用导入相邻不插。
+  // 由于两个非空 segment 按构造方式不会相邻，等价于“chunk 类型跳变时插入空行”。
+  let previousKind: Chunk['kind'] | null = null;
 
   for (const chunk of chunks) {
-    if (chunk.kind === 'segment') {
-      if (chunk.imports.length === 0) {
-        continue;
-      }
-      const segmentLines = sortSegment(
-        chunk.imports,
-        options,
-        groupIndex,
-        fallback,
-      );
-
-      if (previousKind !== null && options.importOrderSeparation) {
-        allLines.push('');
-      }
-      allLines.push(...segmentLines);
-      previousKind = 'segment';
-    } else {
-      if (previousKind === 'segment' && options.importOrderSeparation) {
-        allLines.push('');
-      }
-      allLines.push(renderImport(chunk.importDecl));
-      previousKind = 'side-effect';
+    if (
+      previousKind !== null &&
+      previousKind !== chunk.kind &&
+      options.importOrderSeparation
+    ) {
+      allLines.push('');
     }
+    if (chunk.kind === 'segment') {
+      allLines.push(
+        ...sortSegment(chunk.imports, options, groupIndex, fallback),
+      );
+    } else {
+      allLines.push(renderImport(chunk.importDecl));
+    }
+    previousKind = chunk.kind;
   }
 
   const replacement = allLines.join('\n');
