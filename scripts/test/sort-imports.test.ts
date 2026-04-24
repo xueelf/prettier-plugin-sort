@@ -134,3 +134,27 @@ describe('sort imports — grouping', () => {
     expect(await format(input)).toBe(expected);
   });
 });
+
+describe('sort imports — edge cases', () => {
+  test('no space between closing brace and from keyword is handled', async () => {
+    const input = "import {type FC}from 'react';\n";
+    // default importOrderTypeImports='separate' splits type into its own statement
+    const expected = "import type { FC } from 'react';\n";
+    expect(await format(input)).toBe(expected);
+  });
+
+  test('blank line is inserted between last import and following code', async () => {
+    const input = [
+      "import { useState } from 'react';",
+      'const x = 1;',
+      '',
+    ].join('\n');
+    const expected = [
+      "import { useState } from 'react';",
+      '',
+      'const x = 1;',
+      '',
+    ].join('\n');
+    expect(await format(input)).toBe(expected);
+  });
+});
