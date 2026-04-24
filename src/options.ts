@@ -58,11 +58,11 @@ const VALID_TYPE_STYLES: ReadonlySet<string> = new Set<TypeImportsStyle>([
   'mixed',
 ]);
 
-const isValidImportGroup = (g: unknown): g is ImportGroup =>
-  typeof g === 'string' && VALID_IMPORT_GROUPS.has(g);
+const isValidImportGroup = (value: unknown): value is ImportGroup =>
+  typeof value === 'string' && VALID_IMPORT_GROUPS.has(value);
 
-const isValidTypeStyle = (s: unknown): s is TypeImportsStyle =>
-  typeof s === 'string' && VALID_TYPE_STYLES.has(s);
+const isValidTypeStyle = (value: unknown): value is TypeImportsStyle =>
+  typeof value === 'string' && VALID_TYPE_STYLES.has(value);
 
 type RawSortOptions = ParserOptions & Partial<SortOptions>;
 
@@ -78,7 +78,7 @@ export function resolveSortOptions(
 
   const excludeKeys = Array.isArray(rawOptions.packageJsonOrderExcludeKeys)
     ? rawOptions.packageJsonOrderExcludeKeys.filter(
-        (k): k is string => typeof k === 'string',
+        (key): key is string => typeof key === 'string',
       )
     : [];
 

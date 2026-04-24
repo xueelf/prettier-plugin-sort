@@ -17,8 +17,8 @@ function wrap(parser: Parser, ...transforms: PreprocessFn[]): Parser {
         ? await parser.preprocess(text, parserOptions)
         : text;
 
-      for (const fn of transforms) {
-        source = fn(source, parserOptions);
+      for (const transform of transforms) {
+        source = transform(source, parserOptions);
       }
       return source;
     },
