@@ -53,4 +53,24 @@ describe('sort exports', () => {
     const out = await format(input, { exportOrder: false });
     expect(out).toBe('export { a, b };\n');
   });
+
+  test('is idempotent: already-sorted export stays unchanged', async () => {
+    const input = "export { a, b, c } from 'mod';\n";
+    expect(await format(input)).toBe(input);
+  });
+
+  test('export * as ns is not touched (not inside braces)', async () => {
+    const input = "export * as ns from 'mod';\n";
+    expect(await format(input)).toBe(input);
+  });
+
+  test('export type * from is not touched', async () => {
+    const input = "export type * from 'mod';\n";
+    expect(await format(input)).toBe(input);
+  });
+
+  test('empty export ({}) is left untouched', async () => {
+    const input = 'export {};\n';
+    expect(await format(input)).toBe(input);
+  });
 });

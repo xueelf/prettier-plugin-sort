@@ -157,4 +157,122 @@ describe('sort imports — edge cases', () => {
     ].join('\n');
     expect(await format(input)).toBe(expected);
   });
+
+  test('side-effect imports act as barriers: each segment sorted independently', async () => {
+    const input = [
+      "import B from 'b';",
+      "import A from 'a';",
+      "import 'side-effect';",
+      "import D from 'd';",
+      "import C from 'c';",
+      '',
+    ].join('\n');
+    const expected = [
+      "import A from 'a';",
+      "import B from 'b';",
+      '',
+      "import 'side-effect';",
+      '',
+      "import C from 'c';",
+      "import D from 'd';",
+      '',
+    ].join('\n');
+    expect(await format(input)).toBe(expected);
+  });
+
+  test('side-effect imports stay in place and are not moved across the barrier', async () => {
+    const input = [
+      "import z from 'z';",
+      "import 'polyfill';",
+      "import a from 'a';",
+      '',
+      'export const x = 1;',
+      '',
+    ].join('\n');
+    const expected = [
+      "import z from 'z';",
+      '',
+      "import 'polyfill';",
+      '',
+      "import a from 'a';",
+      '',
+      'export const x = 1;',
+      '',
+    ].join('\n');
+    expect(await format(input)).toBe(expected);
+  });
+
+  test('preserves ES2023 import attributes (with clause)', async () => {
+    const input = [
+      "import b from 'b';",
+      "import data from './data.json' with { type: 'json' };",
+      "import a from 'a';",
+      '',
+    ].join('\n');
+    const expected = [
+      "import a from 'a';",
+      "import b from 'b';",
+      '',
+      "import data from './data.json' with { type: 'json' };",
+      '',
+    ].join('\n');
+    expect(await format(input)).toBe(expected);
+  });
+
+  test('preserves import attributes on side-effect import', async () => {
+    const input = "import './config.json' with { type: 'json' };\n";
+    expect(await format(input)).toBe(input);
+  });
+
+  test('is idempotent: already-sorted input stays unchanged', async () => {
+    const input = [
+      "import { readFile } from 'node:fs/promises';",
+      '',
+      "import lodash from 'lodash';",
+      '',
+      "import App from './App';",
+      '',
+    ].join('\n');
+    expect(await format(input)).toBe(input);
+    expect(await format(await format(input))).toBe(input);
+  });
+
+  test('handles multi-line block comment above import', async () => {
+    const input = [
+      '/**',
+      ' * important doc',
+      ' */',
+      "import z from 'z';",
+      "import a from 'a';",
+      '',
+    ].join('\n');
+    const expected = [
+      "import a from 'a';",
+      '/**',
+      ' * important doc',
+      ' */',
+      "import z from 'z';",
+      '',
+    ].join('\n');
+    expect(await format(input)).toBe(expected);
+  });
+
+  test('merges default import and namespace import from the same source', async () => {
+    const input = [
+      "import Foo from 'mod';",
+      "import * as ns from 'mod';",
+      '',
+    ].join('\n');
+    const expected = "import Foo, * as ns from 'mod';\n";
+    expect(await format(input)).toBe(expected);
+  });
+
+  test('empty file is untouched', async () => {
+    expect(await format('')).toBe('');
+  });
+
+  test('file with only comments is untouched', async () => {
+    const input = '// just a note\n/* nothing here */\n';
+    expect(await format(input)).toBe(input);
+  });
 });
