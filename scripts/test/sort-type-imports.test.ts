@@ -113,4 +113,28 @@ describe('sort type imports', () => {
       ["import { a } from 'mod';", "import { b } from 'mod';", ''].join('\n'),
     );
   });
+
+  test('preserves `import type X` (default type import)', async () => {
+    const input = "import type X from 'mod';\n";
+    expect(await format(input)).toBe(input);
+  });
+
+  test('preserves `import type * as ns` (namespace type import)', async () => {
+    const input = "import type * as T from 'mod';\n";
+    expect(await format(input)).toBe(input);
+  });
+
+  test('does not clobber `import type X` when merged with named type import', async () => {
+    const input = [
+      "import type X from 'mod';",
+      "import type { A } from 'mod';",
+      '',
+    ].join('\n');
+    const expected = [
+      "import type X from 'mod';",
+      "import type { A } from 'mod';",
+      '',
+    ].join('\n');
+    expect(await format(input)).toBe(expected);
+  });
 });

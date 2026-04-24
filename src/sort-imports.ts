@@ -245,10 +245,19 @@ function renderImport(importDecl: ParsedImport): string {
       return `import '${importDecl.source}'${suffix};`;
     }
     if (importDecl.typeClause) {
-      const inner = importDecl.members
-        ? `{ ${renderMembers(importDecl.members)} }`
-        : '';
-      return `import type ${inner} from '${importDecl.source}'${suffix};`;
+      // `import type` 合法形式：`import type { … }`、`import type X`、`import type * as X`。
+      const parts: string[] = [];
+
+      if (importDecl.defaultSpec) {
+        parts.push(importDecl.defaultSpec);
+      }
+      if (importDecl.namespaceSpec) {
+        parts.push(importDecl.namespaceSpec);
+      }
+      if (importDecl.members) {
+        parts.push(`{ ${renderMembers(importDecl.members)} }`);
+      }
+      return `import type ${parts.join(', ')} from '${importDecl.source}'${suffix};`;
     }
     const leftParts: string[] = [];
 
@@ -273,9 +282,8 @@ function sortMembersAlpha<T extends Member>(members: T[]): T[] {
 }
 
 /**
- * 将 `import type { … }` 处理为 `import { type … }`。
- * 合并步骤和 applyTypeImports 只需处理同一种形式。
- * 仅当 members 非空时才做转换，`import type Foo`（defaultSpec）语法非法，不会出现。
+ * 将 `import type { … }` 改写为 `import { type … }`，让后续合并与 applyTypeImports 只需处理一种形式。
+ * `import type Foo` 与 `import type * as ns` 无法在花括号内表达 type 修饰，保持原样。
  */
 function normalizeTypeClause(importDecl: ParsedImport): ParsedImport {
   if (!importDecl.typeClause || importDecl.members === null) {
@@ -300,7 +308,9 @@ function mergeImportsFromSameSource(imports: ParsedImport[]): ParsedImport[] {
   for (const raw of imports) {
     const importDecl = normalizeTypeClause(raw);
 
-    if (importDecl.sideEffect) {
+    // 副作用导入以及 `import type X` / `import type * as X` 这类无法与普通 import 在同一语句里
+    // 表达 type 修饰的形式，保持独立，不参与合并。
+    if (importDecl.sideEffect || importDecl.typeClause) {
       result.push(importDecl);
       continue;
     }
@@ -313,7 +323,7 @@ function mergeImportsFromSameSource(imports: ParsedImport[]): ParsedImport[] {
     }
     const existing = result[existingIndex]!;
 
-    // 两条中最多只有一条能合法地带 defaultSpec / namespaceSpec / attributes；冲突时以首条为准。
+    // 两条中最多只有一条能合法地带 defaultSpec / namespaceSpec / attributes，冲突时以首条为准。
     result[existingIndex] = {
       raw: '',
       source: existing.source,
@@ -530,6 +540,10 @@ export function sortImports(text: string, rawOptions: ParserOptions): string {
   chunks.push({ kind: 'segment', imports: currentSegment });
 
   const allLines: string[] = [];
+  // 追踪上一个写入的 chunk 类型，用于判断是否插入空行：
+  // 连续的副作用导入之间保持相邻，不插入空行。
+  // 副作用导入与前后的 segment 之间才受 importOrderSeparation 控制。
+  let previousKind: 'segment' | 'side-effect' | null = null;
 
   for (const chunk of chunks) {
     if (chunk.kind === 'segment') {
@@ -543,15 +557,17 @@ export function sortImports(text: string, rawOptions: ParserOptions): string {
         fallback,
       );
 
-      if (allLines.length > 0 && options.importOrderSeparation) {
+      if (previousKind !== null && options.importOrderSeparation) {
         allLines.push('');
       }
       allLines.push(...segmentLines);
+      previousKind = 'segment';
     } else {
-      if (allLines.length > 0 && options.importOrderSeparation) {
+      if (previousKind === 'segment' && options.importOrderSeparation) {
         allLines.push('');
       }
       allLines.push(renderImport(chunk.stmt));
+      previousKind = 'side-effect';
     }
   }
 

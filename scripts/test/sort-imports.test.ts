@@ -180,6 +180,29 @@ describe('sort imports — edge cases', () => {
     expect(await format(input)).toBe(expected);
   });
 
+  test('consecutive side-effect imports stay adjacent without blank lines between them', async () => {
+    const input = [
+      "import z from 'z';",
+      "import 'reset.css';",
+      "import 'normalize.css';",
+      "import 'theme.css';",
+      "import a from 'a';",
+      '',
+    ].join('\n');
+    const expected = [
+      "import z from 'z';",
+      '',
+      "import 'reset.css';",
+      "import 'normalize.css';",
+      "import 'theme.css';",
+      '',
+      "import a from 'a';",
+      '',
+    ].join('\n');
+
+    expect(await format(input)).toBe(expected);
+  });
+
   test('side-effect imports stay in place and are not moved across the barrier', async () => {
     const input = [
       "import z from 'z';",
