@@ -86,4 +86,59 @@ describe('sort package.json', () => {
     });
     expect(out).toMatch(/"b": 1/);
   });
+
+  test('optionalDependencies and peerDependencies are alphabetised', async () => {
+    const input = JSON.stringify(
+      {
+        optionalDependencies: { b: '1', a: '2' },
+        peerDependencies: { z: '1', a: '2' },
+      },
+      null,
+      2,
+    );
+    const out = JSON.parse(await format(input));
+    expect(Object.keys(out.optionalDependencies)).toEqual(['a', 'b']);
+    expect(Object.keys(out.peerDependencies)).toEqual(['a', 'z']);
+  });
+
+  test('workspaces string array is alphabetised', async () => {
+    const input = JSON.stringify(
+      { workspaces: ['packages/c', 'packages/a', 'packages/b'] },
+      null,
+      2,
+    );
+    const out = JSON.parse(await format(input));
+    expect(out.workspaces).toEqual(['packages/a', 'packages/b', 'packages/c']);
+  });
+
+  test('empty object is left untouched', async () => {
+    const input = '{}\n';
+    expect(await format(input)).toBe(input);
+  });
+
+  test('is idempotent: running twice yields the same result', async () => {
+    const input = JSON.stringify(
+      {
+        version: '1.0.0',
+        name: 'pkg',
+        keywords: ['b', 'a'],
+        dependencies: { b: '1', a: '2' },
+      },
+      null,
+      2,
+    );
+    const once = await format(input);
+    const twice = await format(once);
+    expect(twice).toBe(once);
+  });
+
+  test('unknown top-level keys are sorted alphabetically after known ones', async () => {
+    const input = JSON.stringify(
+      { zcustom: 1, acustom: 2, name: 'pkg', version: '1.0.0' },
+      null,
+      2,
+    );
+    const out = JSON.parse(await format(input));
+    expect(Object.keys(out)).toEqual(['name', 'version', 'acustom', 'zcustom']);
+  });
 });
