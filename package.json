@@ -1,6 +1,6 @@
 {
   "name": "prettier-plugin-sort",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "description": "An all-in-one Prettier plugin to sort imports, package.json keys, and more.",
   "keywords": [
     "imports",
