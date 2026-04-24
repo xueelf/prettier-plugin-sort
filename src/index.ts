@@ -9,19 +9,6 @@ import { sortPackageJson } from './sort-package';
 
 type PreprocessFn = (text: string, options: ParserOptions) => string;
 
-// /**
-//  * Prettier 格式化 markdown 等文档文件时，会把嵌入的代码块交给对应语言的 parser 处理。
-//  * 但文档中的代码块通常不需要排序，且排序可能干扰示例代码等元素的正确归属。
-//  * 其实可以使用 <!-- prettier-ignore --> 解决这个问题，不应该由插件控制。
-//  */
-// function isEmbeddedInDoc(parserOptions: ParserOptions): boolean {
-//   const parent = (parserOptions as Record<string, unknown>).parentParser;
-//
-//   return (
-//     typeof parent === 'string' && /^(markdown|mdx|html|vue)$/i.test(parent)
-//   );
-// }
-
 function wrap(parser: Parser, ...transforms: PreprocessFn[]): Parser {
   return {
     ...parser,
@@ -30,9 +17,6 @@ function wrap(parser: Parser, ...transforms: PreprocessFn[]): Parser {
         ? await parser.preprocess(text, parserOptions)
         : text;
 
-      // if (isEmbeddedInDoc(parserOptions)) {
-      //   return source;
-      // }
       for (const fn of transforms) {
         source = fn(source, parserOptions);
       }
