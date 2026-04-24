@@ -16,6 +16,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+
       - name: Setup Node.js
         uses: actions/setup-node@v6
         with:
@@ -23,7 +26,10 @@ jobs:
           registry-url: https://registry.npmjs.org
 
       - name: Install dependencies
-        run: npm install
+        run: bun install
+
+      - name: Build
+        run: bun run build
 
       - name: Publish
         run: npm publish
