@@ -165,8 +165,10 @@ interface ImportBlock {
 }
 
 /**
- * 提取源文本开头的连续 import 块。故意不走 AST，
- * 基于正则的处理保持插件与解析器无关且零依赖。
+ * 提取源文本开头的连续 import 块，不走 AST。
+ *
+ * 使用带 `y` 标志的 sticky 正则从游标处逐段推进，避免每轮循环对剩余文本 `slice`。
+ * 将 O(N²) 的字符串复制降为 O(N)。
  */
 function extractImportBlock(text: string): ImportBlock | null {
   const firstRe =
@@ -179,27 +181,27 @@ function extractImportBlock(text: string): ImportBlock | null {
   const start = first.index + (text[first.index] === '\n' ? 1 : 0);
   const statements: RawStatement[] = [];
 
+  // 消耗语句间区域（空行和独立注释）
+  // 第一个空行以内紧贴在下一个 import 上方的注释会被捕获并重新附加，避免排序后丢失。
+  const skipRe = /(?:[ \t]*(?:\/\/[^\n]*|\/\*[\s\S]*?\*\/)?[ \t]*\n)*/y;
+  const importRe =
+    /[ \t]*(import\b[\s\S]*?(?:from\s*(['"])[^'"]+\2|(['"])[^'"]+\3)(?:\s+with\s*\{[^}]*\})?\s*;?)/y;
+
   let cursor = start;
 
   while (cursor < text.length) {
-    // 消耗语句间区域：空行和独立注释。
-    // 第一个空行以内紧贴在下一个 import 上方的注释会被捕获并重新附加，避免排序后丢失。
-    const chunkMatch =
-      /^(?:[ \t]*(?:\/\/[^\n]*|\/\*[\s\S]*?\*\/)?[ \t]*\n)*/.exec(
-        text.slice(cursor),
-      );
-    const chunk = chunkMatch ? chunkMatch[0] : '';
-    const afterSkip = cursor + chunk.length;
+    skipRe.lastIndex = cursor;
+    const skipMatch = skipRe.exec(text);
+    const skipped = skipMatch ? skipMatch[0] : '';
+    const afterSkip = cursor + skipped.length;
 
-    const importMatch =
-      /^[ \t]*(import\b[\s\S]*?(?:from\s*(['"])[^'"]+\2|(['"])[^'"]+\3)(?:\s+with\s*\{[^}]*\})?\s*;?)/.exec(
-        text.slice(afterSkip),
-      );
+    importRe.lastIndex = afterSkip;
+    const importMatch = importRe.exec(text);
 
     if (!importMatch) {
       break;
     }
-    const normalised = chunk.endsWith('\n') ? chunk.slice(0, -1) : chunk;
+    const normalised = skipped.endsWith('\n') ? skipped.slice(0, -1) : skipped;
     const commentLines = normalised.length > 0 ? normalised.split('\n') : [];
     const leadingLines: string[] = [];
 
@@ -238,40 +240,31 @@ function renderMembers(members: Member[]): string {
     .join(', ');
 }
 
+/** 组装 `default, * as ns, { members }` 形式的导出符列表。 */
+function renderSpecifiers(importDecl: ParsedImport): string {
+  const parts: string[] = [];
+
+  if (importDecl.defaultSpec) {
+    parts.push(importDecl.defaultSpec);
+  }
+  if (importDecl.namespaceSpec) {
+    parts.push(importDecl.namespaceSpec);
+  }
+  if (importDecl.members) {
+    parts.push(`{ ${renderMembers(importDecl.members)} }`);
+  }
+  return parts.join(', ');
+}
+
 function renderImport(importDecl: ParsedImport): string {
   const suffix = importDecl.attributes ? ` with ${importDecl.attributes}` : '';
-  const body = (() => {
-    if (importDecl.sideEffect) {
-      return `import '${importDecl.source}'${suffix};`;
-    }
-    if (importDecl.typeClause) {
-      // `import type` 合法形式：`import type { … }`、`import type X`、`import type * as X`。
-      const parts: string[] = [];
+  const source = `'${importDecl.source}'`;
+  const body = importDecl.sideEffect
+    ? `import ${source}${suffix};`
+    : importDecl.typeClause
+      ? `import type ${renderSpecifiers(importDecl)} from ${source}${suffix};`
+      : `import ${renderSpecifiers(importDecl)} from ${source}${suffix};`;
 
-      if (importDecl.defaultSpec) {
-        parts.push(importDecl.defaultSpec);
-      }
-      if (importDecl.namespaceSpec) {
-        parts.push(importDecl.namespaceSpec);
-      }
-      if (importDecl.members) {
-        parts.push(`{ ${renderMembers(importDecl.members)} }`);
-      }
-      return `import type ${parts.join(', ')} from '${importDecl.source}'${suffix};`;
-    }
-    const leftParts: string[] = [];
-
-    if (importDecl.defaultSpec) {
-      leftParts.push(importDecl.defaultSpec);
-    }
-    if (importDecl.namespaceSpec) {
-      leftParts.push(importDecl.namespaceSpec);
-    }
-    if (importDecl.members) {
-      leftParts.push(`{ ${renderMembers(importDecl.members)} }`);
-    }
-    return `import ${leftParts.join(', ')} from '${importDecl.source}'${suffix};`;
-  })();
   return importDecl.leadingComments + body;
 }
 
