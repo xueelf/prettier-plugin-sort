@@ -5,15 +5,13 @@ import { splitTopLevel } from './utils';
 
 /**
  * 按字母序排列 `export { … }` 花括号内的命名导出。
- * 不挪动语句位置，不跨语句合并——只针对单条 export 语句的花括号内部。
+ * 不挪动语句位置，不跨语句合并，只针对单条 export 语句的花括号内部。
  *
  * 覆盖：
  *   export { a, b };
  *   export { a, b } from 'mod';
  *   export type { A, B };
  *   export type { A, B } from 'mod';
- *
- * 故意保持正则驱动，和 sort-imports 一样让插件与解析器无关、零依赖。
  */
 export function sortExports(text: string, rawOptions: ParserOptions): string {
   const options = resolveSortOptions(rawOptions);
@@ -40,6 +38,7 @@ export function sortExports(text: string, rawOptions: ParserOptions): string {
         return match;
       }
       const prefix = typeKeyword ? `export${typeKeyword}` : 'export';
+
       return `${prefix} { ${sorted.join(', ')} }`;
     },
   );
