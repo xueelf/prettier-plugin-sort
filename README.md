@@ -182,6 +182,35 @@ import { useEffect, useState } from 'react';
 
 Set `importOrderMergeDuplicates` to `false` if you want to keep the original separate statements. Side-effect imports (`import 'mod';`) are never merged because their order has runtime semantics.
 
+#### Side-effect imports
+
+The order of side-effect imports (`import 'mod'`) often carries runtime meaning, such as CSS cascade order or polyfills that must load before a framework. The plugin never moves other imports across a side-effect import — imports on each side are sorted independently, and the side-effect import itself stays in place.
+
+Before:
+
+<!-- prettier-ignore -->
+```typescript
+import Button from './Button';
+import App from './App';
+import 'normalize.css';
+import theme from './theme';
+import Icon from './Icon';
+```
+
+After:
+
+```typescript
+import App from './App';
+import Button from './Button';
+
+import 'normalize.css';
+
+import Icon from './Icon';
+import theme from './theme';
+```
+
+Imports on each side are sorted independently. The side-effect import itself stays in place.
+
 Sorting rules:
 
 - Imports are classified into groups. Within each group they are sorted alphabetically
@@ -189,7 +218,7 @@ Sorting rules:
 - A blank line is inserted between groups by default. Disable with `importOrderSeparation`
 - `type` imports are split into their own statement by default. Use `importOrderTypeImports` to inline them instead
 - Multiple imports from the same source are merged into one by default. Disable with `importOrderMergeDuplicates`
-- Side-effect imports (`import 'mod'`) are never merged or moved across groups
+- Side-effect imports (`import 'mod'`) carry semantic order and are never moved. Imports on either side are sorted independently
 
 ### Exports
 
