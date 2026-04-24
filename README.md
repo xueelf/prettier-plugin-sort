@@ -146,8 +146,8 @@ The shape of `importOrderTypeImports` mirrors conventions in the ESLint ecosyste
 
 Using `import { c, type B, a } from 'mod';` as an example:
 
-| Mode           | Result                                                        |
-| -------------- | ------------------------------------------------------------- |
+| Mode           | Result                                                           |
+| -------------- | ---------------------------------------------------------------- |
 | `separate`     | `import type { B } from 'mod';`<br>`import { a, c } from 'mod';` |
 | `inline-first` | `import { type B, a, c } from 'mod';`                            |
 | `inline-last`  | `import { a, c, type B } from 'mod';`                            |
