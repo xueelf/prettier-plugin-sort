@@ -4,9 +4,11 @@ import { type ParserOptions } from 'prettier';
 
 import {
   type ImportGroup,
+  type SortOptions,
   type TypeImportsStyle,
   resolveSortOptions,
 } from './options';
+import { splitTopLevel } from './utils';
 
 const NODE_BUILTINS = new Set<string>(builtinModules);
 
@@ -76,35 +78,10 @@ interface ParsedImport {
   namespaceSpec: string | null;
   /** `null` 表示没有命名导入块。 */
   members: Member[] | null;
+  /** ES2023 import attributes，如 `with { type: 'json' }`。`null` 表示无。 */
+  attributes: string | null;
   /** 紧贴在 import 上方的注释，包含末尾换行符。 */
   leadingComments: string;
-}
-
-function splitTopLevel(input: string, separator: string): string[] {
-  const out: string[] = [];
-
-  let buf = '';
-  let depth = 0;
-
-  for (const ch of input) {
-    if (ch === '{' || ch === '(' || ch === '[') {
-      depth++;
-    } else if (ch === '}' || ch === ')' || ch === ']') {
-      depth--;
-    }
-
-    if (ch === separator && depth === 0) {
-      out.push(buf);
-      buf = '';
-      continue;
-    }
-    buf += ch;
-  }
-
-  if (buf.length > 0) {
-    out.push(buf);
-  }
-  return out.map(s => s.trim()).filter(s => s.length > 0);
 }
 
 function splitMembers(inner: string): Member[] {
@@ -124,7 +101,8 @@ interface RawStatement {
 function parseImport(stmt: RawStatement): ParsedImport | null {
   const trimmed = stmt.raw.trim();
   const leadingComments = stmt.leadingComments;
-  const sideEffect = /^import\s*(['"])([^'"]+)\1\s*;?$/.exec(trimmed);
+  const sideEffect =
+    /^import\s*(['"])([^'"]+)\1(?:\s+with\s*(\{[^}]*\}))?\s*;?$/.exec(trimmed);
 
   if (sideEffect) {
     return {
@@ -135,11 +113,12 @@ function parseImport(stmt: RawStatement): ParsedImport | null {
       defaultSpec: null,
       namespaceSpec: null,
       members: null,
+      attributes: sideEffect[3] ?? null,
       leadingComments,
     };
   }
   const m =
-    /^import\s+(type\s+)?([\s\S]+?)\s*from\s*(['"])([^'"]+)\3\s*;?$/.exec(
+    /^import\s+(type\s+)?([\s\S]+?)\s*from\s*(['"])([^'"]+)\3(?:\s+with\s*(\{[^}]*\}))?\s*;?$/.exec(
       trimmed,
     );
 
@@ -149,6 +128,7 @@ function parseImport(stmt: RawStatement): ParsedImport | null {
   const typeClause = Boolean(m[1]);
   const clause = (m[2] ?? '').trim();
   const source = m[4] ?? '';
+  const attributes = m[5] ?? null;
 
   let defaultSpec: string | null = null;
   let namespaceSpec: string | null = null;
@@ -173,6 +153,7 @@ function parseImport(stmt: RawStatement): ParsedImport | null {
     defaultSpec,
     namespaceSpec,
     members,
+    attributes,
     leadingComments,
   };
 }
@@ -211,7 +192,7 @@ function extractImportBlock(text: string): ImportBlock | null {
     const afterSkip = cursor + chunk.length;
 
     const importMatch =
-      /^[ \t]*(import\b[\s\S]*?(?:from\s*(['"])[^'"]+\2|(['"])[^'"]+\3)\s*;?)/.exec(
+      /^[ \t]*(import\b[\s\S]*?(?:from\s*(['"])[^'"]+\2|(['"])[^'"]+\3)(?:\s+with\s*\{[^}]*\})?\s*;?)/.exec(
         text.slice(afterSkip),
       );
 
@@ -258,15 +239,16 @@ function renderMembers(members: Member[]): string {
 }
 
 function renderImport(importDecl: ParsedImport): string {
+  const suffix = importDecl.attributes ? ` with ${importDecl.attributes}` : '';
   const body = (() => {
     if (importDecl.sideEffect) {
-      return `import '${importDecl.source}';`;
+      return `import '${importDecl.source}'${suffix};`;
     }
     if (importDecl.typeClause) {
       const inner = importDecl.members
         ? `{ ${renderMembers(importDecl.members)} }`
         : '';
-      return `import type ${inner} from '${importDecl.source}';`;
+      return `import type ${inner} from '${importDecl.source}'${suffix};`;
     }
     const leftParts: string[] = [];
 
@@ -279,7 +261,7 @@ function renderImport(importDecl: ParsedImport): string {
     if (importDecl.members) {
       leftParts.push(`{ ${renderMembers(importDecl.members)} }`);
     }
-    return `import ${leftParts.join(', ')} from '${importDecl.source}';`;
+    return `import ${leftParts.join(', ')} from '${importDecl.source}'${suffix};`;
   })();
   return importDecl.leadingComments + body;
 }
@@ -331,7 +313,7 @@ function mergeImportsFromSameSource(imports: ParsedImport[]): ParsedImport[] {
     }
     const existing = result[existingIndex]!;
 
-    // 两条中最多只有一条能合法地带 defaultSpec / namespaceSpec；冲突时以首条为准。
+    // 两条中最多只有一条能合法地带 defaultSpec / namespaceSpec / attributes；冲突时以首条为准。
     result[existingIndex] = {
       raw: '',
       source: existing.source,
@@ -343,6 +325,7 @@ function mergeImportsFromSameSource(imports: ParsedImport[]): ParsedImport[] {
         existing.members === null && importDecl.members === null
           ? null
           : [...(existing.members ?? []), ...(importDecl.members ?? [])],
+      attributes: existing.attributes ?? importDecl.attributes,
       // 后续重复条目的注释静默丢弃。
       leadingComments: existing.leadingComments,
     };
@@ -385,6 +368,7 @@ function applyTypeImports(
         members: sortMembersAlpha(
           typeMembers.map(member => ({ ...member, isType: false })),
         ),
+        attributes: importDecl.attributes,
         leadingComments: importDecl.leadingComments,
       });
     }
@@ -435,40 +419,26 @@ function applyTypeImports(
   return [{ ...base, members: ordered }];
 }
 
-export function sortImports(text: string, rawOptions: ParserOptions): string {
-  const options = resolveSortOptions(rawOptions);
-
-  if (!options.importOrder) {
-    return text;
-  }
-  const block = extractImportBlock(text);
-
-  if (!block || block.statements.length === 0) {
-    return text;
-  }
-  const parsed = block.statements
-    .map(rawStmt => parseImport(rawStmt))
-    .filter((decl): decl is ParsedImport => decl !== null);
-
-  if (parsed.length === 0) {
-    return text;
+/**
+ * 对一段不含副作用导入的 import 列表进行排序并渲染为行数组。
+ * 副作用导入在 sortImports 层面已被拆分到各自的 chunk，此处只处理同一 chunk 内的普通 import。
+ */
+function sortSegment(
+  imports: ParsedImport[],
+  options: Required<SortOptions>,
+  groupIndex: Map<ImportGroup, number>,
+  fallback: number,
+): string[] {
+  if (imports.length === 0) {
+    return [];
   }
   const style = options.importOrderTypeImports;
   const deduped = options.importOrderMergeDuplicates
-    ? mergeImportsFromSameSource(parsed)
-    : parsed;
+    ? mergeImportsFromSameSource(imports)
+    : imports;
   const rewritten = deduped.flatMap(importDecl =>
     applyTypeImports(importDecl, style),
   );
-
-  const groupIndex = new Map<ImportGroup, number>(
-    options.importOrderGroups.map((group, index): [ImportGroup, number] => [
-      group,
-      index,
-    ]),
-  );
-  const fallback = options.importOrderGroups.length;
-
   const decorated = rewritten.map((importDecl, index) => ({
     stmt: importDecl,
     group: detectGroup(importDecl.source),
@@ -509,7 +479,83 @@ export function sortImports(text: string, rawOptions: ParserOptions): string {
     lines.push(renderImport(item.stmt));
     prevGroup = item.group;
   }
-  const replacement = lines.join('\n');
+  return lines;
+}
+
+export function sortImports(text: string, rawOptions: ParserOptions): string {
+  const options = resolveSortOptions(rawOptions);
+
+  if (!options.importOrder) {
+    return text;
+  }
+  const block = extractImportBlock(text);
+
+  if (!block || block.statements.length === 0) {
+    return text;
+  }
+  const parsed = block.statements
+    .map(rawStmt => parseImport(rawStmt))
+    .filter((decl): decl is ParsedImport => decl !== null);
+
+  if (parsed.length === 0) {
+    return text;
+  }
+
+  const groupIndex = new Map<ImportGroup, number>(
+    options.importOrderGroups.map((group, index): [ImportGroup, number] => [
+      group,
+      index,
+    ]),
+  );
+  const fallback = options.importOrderGroups.length;
+
+  // 副作用导入将 import 块切割为若干 chunk，每个 chunk 独立排序。
+  // 副作用导入本身保持原位不移动，遵循社区关于副作用 import 顺序有语义的共识。
+  type Chunk =
+    | { kind: 'segment'; imports: ParsedImport[] }
+    | { kind: 'side-effect'; stmt: ParsedImport };
+
+  const chunks: Chunk[] = [];
+  let currentSegment: ParsedImport[] = [];
+
+  for (const importDecl of parsed) {
+    if (importDecl.sideEffect) {
+      chunks.push({ kind: 'segment', imports: currentSegment });
+      chunks.push({ kind: 'side-effect', stmt: importDecl });
+      currentSegment = [];
+    } else {
+      currentSegment.push(importDecl);
+    }
+  }
+  chunks.push({ kind: 'segment', imports: currentSegment });
+
+  const allLines: string[] = [];
+
+  for (const chunk of chunks) {
+    if (chunk.kind === 'segment') {
+      if (chunk.imports.length === 0) {
+        continue;
+      }
+      const segmentLines = sortSegment(
+        chunk.imports,
+        options,
+        groupIndex,
+        fallback,
+      );
+
+      if (allLines.length > 0 && options.importOrderSeparation) {
+        allLines.push('');
+      }
+      allLines.push(...segmentLines);
+    } else {
+      if (allLines.length > 0 && options.importOrderSeparation) {
+        allLines.push('');
+      }
+      allLines.push(renderImport(chunk.stmt));
+    }
+  }
+
+  const replacement = allLines.join('\n');
   const trailing = text.slice(block.end);
   // 当 import 块后还有其他代码时，保证两者之间始终有一个空行。
   const suffix = trailing.trim() ? '\n\n' + trailing.trimStart() : trailing;

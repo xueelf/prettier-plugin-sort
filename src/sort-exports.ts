@@ -1,6 +1,7 @@
 import { type ParserOptions } from 'prettier';
 
 import { resolveSortOptions } from './options';
+import { splitTopLevel } from './utils';
 
 /**
  * 按字母序排列 `export { … }` 花括号内的命名导出。
@@ -42,33 +43,6 @@ export function sortExports(text: string, rawOptions: ParserOptions): string {
       return `${prefix} { ${sorted.join(', ')} }`;
     },
   );
-}
-
-function splitTopLevel(input: string, separator: string): string[] {
-  const out: string[] = [];
-
-  let buf = '';
-  let depth = 0;
-
-  for (const ch of input) {
-    if (ch === '{' || ch === '(' || ch === '[') {
-      depth++;
-    } else if (ch === '}' || ch === ')' || ch === ']') {
-      depth--;
-    }
-
-    if (ch === separator && depth === 0) {
-      out.push(buf);
-      buf = '';
-      continue;
-    }
-    buf += ch;
-  }
-
-  if (buf.length > 0) {
-    out.push(buf);
-  }
-  return out.map(s => s.trim()).filter(s => s.length > 0);
 }
 
 function stripTypePrefix(member: string): string {
