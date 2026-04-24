@@ -6,28 +6,30 @@
  * `{ a, b as c }`，包裹结构内的逗号不应被当作分隔符。
  */
 export function splitTopLevel(input: string, separator: string): string[] {
-  const out: string[] = [];
+  const segments: string[] = [];
 
-  let buf = '';
+  let current = '';
   let depth = 0;
 
-  for (const ch of input) {
-    if (ch === '{' || ch === '(' || ch === '[') {
+  for (const char of input) {
+    if (char === '{' || char === '(' || char === '[') {
       depth++;
-    } else if (ch === '}' || ch === ')' || ch === ']') {
+    } else if (char === '}' || char === ')' || char === ']') {
       depth--;
     }
 
-    if (ch === separator && depth === 0) {
-      out.push(buf);
-      buf = '';
+    if (char === separator && depth === 0) {
+      segments.push(current);
+      current = '';
       continue;
     }
-    buf += ch;
+    current += char;
   }
 
-  if (buf.length > 0) {
-    out.push(buf);
+  if (current.length > 0) {
+    segments.push(current);
   }
-  return out.map(s => s.trim()).filter(s => s.length > 0);
+  return segments
+    .map(segment => segment.trim())
+    .filter(segment => segment.length > 0);
 }
