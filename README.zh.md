@@ -56,7 +56,7 @@ import react from 'react';
 import App from './App.tsx';
 ```
 
-import 的模块一般可以按其来源分为不同的类别，例如上面的示例代码，'node:fs' 就属于 builtin 分类，该分类涵盖 Node.js、Bun、Deno 等**运行时**的内置模块。而像 react 和 lodash 这种直接从 npm 下载的依赖模块，属于 external 分类。
+import 的模块一般可以按其来源分为不同的类别，例如上面的示例代码，'node:fs' 就属于 builtin 分类，该分类涵盖 Node.js 和 Bun **运行时**的内置模块。而像 react 和 lodash 这种直接从 npm 下载的依赖模块，属于 external 分类。
 
 插件会先根据不同的模块进行分类，然后在模块内部基于字母顺序进行排列。
 
@@ -76,14 +76,14 @@ import 的模块一般可以按其来源分为不同的类别，例如上面的�
 
 各分组的匹配规则如下：
 
-| 分组       | 匹配内容                                                | 示例                               |
-| ---------- | ------------------------------------------------------- | ---------------------------------- |
-| `builtin`  | `node:*`、`bun:*`、`deno:*`，以及无前缀的 Node 内置模块 | `node:fs`、`path`                  |
-| `external` | npm 包，以及不属于其他分组的模块                        | `react`、`@scope/pkg`              |
-| `internal` | 项目绝对路径与别名                                      | `/utils`、`~/app`、`@/shared`      |
-| `parent`   | 向上跳级的相对路径                                      | `../Button`                        |
-| `sibling`  | 同级相对路径（不包含 index）                            | `./Icon`                           |
-| `index`    | 当前目录的 index 模块                                   | `.`、`./`、`./index`、`./index.ts` |
+| 分组       | 匹配内容                                             | 示例                               |
+| ---------- | ---------------------------------------------------- | ---------------------------------- |
+| `builtin`  | `node:*`、`bun:*`、`bun`，以及无前缀的 Node 内置模块 | `node:fs`、`path`、`bun`           |
+| `external` | npm 包，以及不属于其他分组的模块                     | `react`、`@scope/pkg`              |
+| `internal` | 项目绝对路径与别名                                   | `/utils`、`~/app`、`@/shared`      |
+| `parent`   | 向上跳级的相对路径                                   | `../Button`                        |
+| `sibling`  | 同级相对路径（不包含 index）                         | `./Icon`                           |
+| `index`    | 当前目录的 index 模块                                | `.`、`./`、`./index`、`./index.ts` |
 
 > **关于 `internal` 的检测方式：** 插件目前通过说明符的前缀硬编码（`/`、`~`、`@/`）来判断，不会读取 tsconfig `paths` 或任何构建工具的配置。后续版本可能会提供 `importOrderInternalPatterns` 选项，支持自定义正则匹配。
 
