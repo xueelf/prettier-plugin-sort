@@ -298,4 +298,43 @@ describe('sort imports — edge cases', () => {
     const input = '// just a note\n/* nothing here */\n';
     expect(await format(input)).toBe(input);
   });
+
+  test('does not misparse top-level import.meta as an import statement', async () => {
+    const input = [
+      "import a from 'a';",
+      'console.log(import.meta.url);',
+      '',
+    ].join('\n');
+    const expected = [
+      "import a from 'a';",
+      '',
+      'console.log(import.meta.url);',
+      '',
+    ].join('\n');
+    expect(await format(input)).toBe(expected);
+  });
+
+  test('does not merge same-source imports when import attributes differ', async () => {
+    const input = [
+      "import data from './x.json' with { type: 'json' };",
+      "import other from './x.json';",
+      '',
+    ].join('\n');
+    expect(await format(input)).toBe(input);
+  });
+
+  test('treats bare `bun` specifier as builtin', async () => {
+    const input = [
+      "import lodash from 'lodash';",
+      "import { build } from 'bun';",
+      '',
+    ].join('\n');
+    const expected = [
+      "import { build } from 'bun';",
+      '',
+      "import lodash from 'lodash';",
+      '',
+    ].join('\n');
+    expect(await format(input)).toBe(expected);
+  });
 });

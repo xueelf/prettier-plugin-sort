@@ -14,11 +14,11 @@ const NODE_BUILTINS = new Set<string>(builtinModules);
 
 /** 将 import 遵循 eslint-plugin-import import/order 的算法进行分类。 */
 function detectGroup(source: string): ImportGroup {
-  // 1. 带运行时前缀的内置模块，以及无前缀的 Node 内核模块。
+  // 1. 带运行时前缀的内置模块，以及无前缀的内核模块。
   if (
-    source.startsWith('node:') ||
+    source === 'bun' ||
     source.startsWith('bun:') ||
-    source.startsWith('deno:')
+    source.startsWith('node:')
   ) {
     return 'builtin';
   }
@@ -171,8 +171,9 @@ interface ImportBlock {
  * 将 O(N²) 的字符串复制降为 O(N)。
  */
 function extractImportBlock(text: string): ImportBlock | null {
+  // `import\b(?![.(])` 排除 `import.meta` 与动态 `import('mod')`，避免被当作导入语句误吃。
   const firstRe =
-    /(?:^|\n)(?:[ \t]*(?:\/\/[^\n]*|\/\*[\s\S]*?\*\/)[ \t]*\n)*[ \t]*import\b/;
+    /(?:^|\n)(?:[ \t]*(?:\/\/[^\n]*|\/\*[\s\S]*?\*\/)[ \t]*\n)*[ \t]*import\b(?![.(])/;
   const first = firstRe.exec(text);
 
   if (!first) {
@@ -185,7 +186,7 @@ function extractImportBlock(text: string): ImportBlock | null {
   // 第一个空行以内紧贴在下一个 import 上方的注释会被捕获并重新附加，避免排序后丢失。
   const skipRe = /(?:[ \t]*(?:\/\/[^\n]*|\/\*[\s\S]*?\*\/)?[ \t]*\n)*/y;
   const importRe =
-    /[ \t]*(import\b[\s\S]*?(?:from\s*(['"])[^'"]+\2|(['"])[^'"]+\3)(?:\s+with\s*\{[^}]*\})?\s*;?)/y;
+    /[ \t]*(import\b(?![.(])[\s\S]*?(?:from\s*(['"])[^'"]+\2|(['"])[^'"]+\3)(?:\s+with\s*\{[^}]*\})?\s*;?)/y;
 
   let cursor = start;
 
@@ -295,7 +296,8 @@ function normalizeTypeClause(importDecl: ParsedImport): ParsedImport {
  * 合并后再交给 applyTypeImports，separate 模式下依然会把 type 和值拆回两条。
  */
 function mergeImportsFromSameSource(imports: ParsedImport[]): ParsedImport[] {
-  const indexBySource = new Map<string, number>();
+  // 合并键包含 attributes：`with { type: 'json' }` 与不带 attributes 是不同语义，强合并会导致语句丢失。
+  const indexByKey = new Map<string, number>();
   const result: ParsedImport[] = [];
 
   for (const rawImport of imports) {
@@ -307,16 +309,18 @@ function mergeImportsFromSameSource(imports: ParsedImport[]): ParsedImport[] {
       result.push(importDecl);
       continue;
     }
-    const existingIndex = indexBySource.get(importDecl.source);
+    const mergeKey = `${importDecl.source}\0${importDecl.attributes ?? ''}`;
+    const existingIndex = indexByKey.get(mergeKey);
 
     if (existingIndex === undefined) {
-      indexBySource.set(importDecl.source, result.length);
+      indexByKey.set(mergeKey, result.length);
       result.push(importDecl);
       continue;
     }
     const existing = result[existingIndex]!;
 
-    // 两条中最多只有一条能合法地带 defaultSpec / namespaceSpec / attributes，冲突时以首条为准。
+    // 两条中最多只有一条能合法地带 defaultSpec / namespaceSpec，冲突时以首条为准。
+    // attributes 必然相同（已编入 mergeKey），直接复用 existing 的即可。
     result[existingIndex] = {
       source: existing.source,
       typeClause: false,
@@ -327,7 +331,7 @@ function mergeImportsFromSameSource(imports: ParsedImport[]): ParsedImport[] {
         existing.members === null && importDecl.members === null
           ? null
           : [...(existing.members ?? []), ...(importDecl.members ?? [])],
-      attributes: existing.attributes ?? importDecl.attributes,
+      attributes: existing.attributes,
       // 后续重复条目的注释静默丢弃。
       leadingComments: existing.leadingComments,
     };
