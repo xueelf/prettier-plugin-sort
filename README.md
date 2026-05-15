@@ -56,7 +56,7 @@ import react from 'react';
 import App from './App.tsx';
 ```
 
-Each import belongs to a group. For example, `node:fs` is a `builtin` (covers Node.js / Bun / Deno built-ins), while `react` and `lodash` are `external` npm packages. The plugin first classifies each import by group, then sorts alphabetically within each group.
+Each import belongs to a group. For example, `node:fs` is a `builtin` (covers Node.js and Bun **runtime** built-ins), while `react` and `lodash` are `external` npm packages. The plugin first classifies each import by group, then sorts alphabetically within each group.
 
 Grouping and ordering follow the conventions of [eslint-plugin-import](https://github.com/import-js/eslint-plugin-import)'s [import/order](https://github.com/import-js/eslint-plugin-import/blob/main/docs/rules/order.md) rule.
 
@@ -76,7 +76,7 @@ Group matchers:
 
 | Group      | Matches                                                     | Examples                           |
 | ---------- | ----------------------------------------------------------- | ---------------------------------- |
-| `builtin`  | `node:*`, `bun:*`, `deno:*`, and unprefixed Node built-ins  | `node:fs`, `path`                  |
+| `builtin`  | `node:*`, `bun:*`, `bun`, and unprefixed Node built-ins     | `node:fs`, `path`, `bun`           |
 | `external` | npm packages, and anything that doesn't match another group | `react`, `@scope/pkg`              |
 | `internal` | Project absolute paths and aliases                          | `/utils`, `~/app`, `@/shared`      |
 | `parent`   | Parent-relative paths                                       | `../Button`                        |
