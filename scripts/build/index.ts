@@ -1,6 +1,6 @@
+import { type BuildConfig, build } from 'bun';
 import { rm } from 'node:fs/promises';
 
-import { type BuildConfig, build } from 'bun';
 import dts from 'bun-plugin-dts';
 
 const outdir = 'dist';
