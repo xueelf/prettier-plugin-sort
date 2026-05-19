@@ -146,6 +146,58 @@ describe('sort package.json', () => {
     expect(twice).toBe(once);
   });
 
+  test('scripts keys are sorted with pre/post grouping and colon namespacing', async () => {
+    const input = JSON.stringify(
+      {
+        name: 'pkg',
+        scripts: {
+          postbuild: 'echo done',
+          'build:css': 'postcss',
+          start: 'node .',
+          build: 'tsc',
+          prebuild: 'clean',
+          'build:ts': 'tsc',
+          test: 'vitest',
+          'test:unit': 'vitest unit',
+        },
+      },
+      null,
+      2,
+    );
+    const out = JSON.parse(await format(input));
+    expect(Object.keys(out.scripts)).toEqual([
+      'prebuild',
+      'build',
+      'postbuild',
+      'build:css',
+      'build:ts',
+      'start',
+      'test',
+      'test:unit',
+    ]);
+  });
+
+  test('betterScripts keys are sorted the same way as scripts', async () => {
+    const input = JSON.stringify(
+      {
+        name: 'pkg',
+        betterScripts: {
+          test: 'vitest',
+          build: 'tsc',
+          prebuild: 'clean',
+        },
+      },
+      null,
+      2,
+    );
+    const out = JSON.parse(await format(input));
+    expect(Object.keys(out.betterScripts)).toEqual([
+      'prebuild',
+      'build',
+      'test',
+    ]);
+  });
+
   test('unknown top-level keys are sorted alphabetically after known ones', async () => {
     const input = JSON.stringify(
       { zcustom: 1, acustom: 2, name: 'pkg', version: '1.0.0' },
