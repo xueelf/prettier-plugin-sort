@@ -198,6 +198,31 @@ describe('sort package.json', () => {
     ]);
   });
 
+  test('exports keys: paths first, conditions after, default last, recursive', async () => {
+    const input = JSON.stringify(
+      {
+        name: 'pkg',
+        exports: {
+          './foo': './dist/foo.js',
+          import: './dist/index.mjs',
+          default: './dist/index.js',
+          require: './dist/index.cjs',
+          './bar': './dist/bar.js',
+        },
+      },
+      null,
+      2,
+    );
+    const out = JSON.parse(await format(input));
+    expect(Object.keys(out.exports)).toEqual([
+      './bar',
+      './foo',
+      'import',
+      'require',
+      'default',
+    ]);
+  });
+
   test('unknown top-level keys are sorted alphabetically after known ones', async () => {
     const input = JSON.stringify(
       { zcustom: 1, acustom: 2, name: 'pkg', version: '1.0.0' },
