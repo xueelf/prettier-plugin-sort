@@ -32,13 +32,15 @@ function isStringArray(value: unknown): value is string[] {
   );
 }
 
+// 预计算的顶层字段顺序索引，避免每次排序都重建 Map。
+const TOP_LEVEL_ORDER_INDEX = new Map(
+  PACKAGE_JSON_TOP_LEVEL_ORDER.map((key, index) => [key, index] as const),
+);
+
 function sortObjectKeysByOrder(
   record: Record<string, JsonValue>,
-  order: readonly string[],
+  orderIndex: Map<string, number>,
 ): Record<string, JsonValue> {
-  const orderIndex = new Map<string, number>(
-    order.map((key, index): [string, number] => [key, index]),
-  );
   const known: Array<[string, JsonValue]> = [];
   const rest: Array<[string, JsonValue]> = [];
 
@@ -300,7 +302,7 @@ export function sortPackageJson(
   }
 
   if (options.packageJsonOrder) {
-    result = sortObjectKeysByOrder(result, PACKAGE_JSON_TOP_LEVEL_ORDER);
+    result = sortObjectKeysByOrder(result, TOP_LEVEL_ORDER_INDEX);
 
     // scripts / betterScripts 键名按命名空间分组排序。
     for (const field of ['scripts', 'betterScripts'] as const) {

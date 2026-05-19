@@ -11,6 +11,7 @@ import {
 import { splitTopLevel } from './utils';
 
 const NODE_BUILTINS = new Set<string>(builtinModules);
+const INDEX_PATTERN = /^\.\/index(\.[a-z]+)?$/;
 
 /** 根据导入来源归类为不同分组。分类规则遵循 eslint-plugin-import 的 import/order 算法。 */
 function detectGroup(source: string): ImportGroup {
@@ -33,7 +34,7 @@ function detectGroup(source: string): ImportGroup {
   if (
     source === '.' ||
     source === './' ||
-    /^\.\/index(\.[a-z]+)?$/.test(source)
+    INDEX_PATTERN.test(source)
   ) {
     return 'index';
   }
