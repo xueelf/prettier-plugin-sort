@@ -5,6 +5,7 @@
     "target": "ESNext",
     "module": "Preserve",
     "moduleDetection": "force",
+    "jsx": "react-jsx",
     "allowJs": true,
     "types": ["bun"],
 
@@ -13,6 +14,11 @@
     "allowImportingTsExtensions": true,
     "verbatimModuleSyntax": true,
     "noEmit": true,
+    "outDir": "dist",
+    "paths": {
+      "~/*": ["./*"],
+      "@/*": ["./src/*"]
+    },
 
     // Best practices
     "strict": true,
@@ -24,7 +30,11 @@
     // Some stricter flags (disabled by default)
     "noUnusedLocals": false,
     "noUnusedParameters": false,
-    "noPropertyAccessFromIndexSignature": false
+    "noPropertyAccessFromIndexSignature": false,
   },
-  "include": ["scripts/**/*.ts", "src/**/*.ts"]
+  "include": [
+    "*.config.ts",
+    "src",
+    "scripts",
+  ],
 }

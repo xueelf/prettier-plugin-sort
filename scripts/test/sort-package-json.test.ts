@@ -43,15 +43,39 @@ describe('sort package.json', () => {
     expect(Object.keys(JSON.parse(out).dependencies)).toEqual(['a', 'b', 'c']);
   });
 
-  test('auto-detects string arrays and alphabetises them', async () => {
+  test('dedupes keywords, files, activationEvents — keeps original order', async () => {
     const input = JSON.stringify(
-      { keywords: ['c', 'a', 'b'], files: ['z.js', 'a.js'] },
+      { keywords: ['c', 'a', 'b', 'a', 'b'], files: ['z.js', 'a.js', 'z.js'] },
       null,
       2,
     );
     const out = JSON.parse(await format(input));
-    expect(out.keywords).toEqual(['a', 'b', 'c']);
-    expect(out.files).toEqual(['a.js', 'z.js']);
+    expect(out.keywords).toEqual(['c', 'a', 'b']);
+    expect(out.files).toEqual(['z.js', 'a.js']);
+  });
+
+  test('bundledDependencies and extensionPack are deduped and sorted', async () => {
+    const input = JSON.stringify(
+      {
+        bundledDependencies: ['c', 'a', 'b', 'a'],
+        extensionPack: ['d', 'b', 'c', 'b'],
+      },
+      null,
+      2,
+    );
+    const out = JSON.parse(await format(input));
+    expect(out.bundledDependencies).toEqual(['a', 'b', 'c']);
+    expect(out.extensionPack).toEqual(['b', 'c', 'd']);
+  });
+
+  test('workspaces array is not sorted', async () => {
+    const input = JSON.stringify(
+      { workspaces: ['packages/c', 'packages/a', 'packages/b'] },
+      null,
+      2,
+    );
+    const out = JSON.parse(await format(input));
+    expect(out.workspaces).toEqual(['packages/c', 'packages/a', 'packages/b']);
   });
 
   test('non-string arrays are left untouched', async () => {
@@ -99,16 +123,6 @@ describe('sort package.json', () => {
     const out = JSON.parse(await format(input));
     expect(Object.keys(out.optionalDependencies)).toEqual(['a', 'b']);
     expect(Object.keys(out.peerDependencies)).toEqual(['a', 'z']);
-  });
-
-  test('workspaces string array is alphabetised', async () => {
-    const input = JSON.stringify(
-      { workspaces: ['packages/c', 'packages/a', 'packages/b'] },
-      null,
-      2,
-    );
-    const out = JSON.parse(await format(input));
-    expect(out.workspaces).toEqual(['packages/a', 'packages/b', 'packages/c']);
   });
 
   test('empty object is left untouched', async () => {

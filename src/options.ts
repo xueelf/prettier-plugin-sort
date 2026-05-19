@@ -40,7 +40,7 @@ export const DEFAULT_SORT_OPTIONS: Required<SortOptions> = {
   packageJsonOrderExcludeKeys: [],
 };
 
-/** import 分组。 */
+/** 有效的 import 分组值。 */
 const VALID_IMPORT_GROUPS: ReadonlySet<string> = new Set<ImportGroup>([
   'builtin',
   'external',
@@ -50,7 +50,7 @@ const VALID_IMPORT_GROUPS: ReadonlySet<string> = new Set<ImportGroup>([
   'index',
 ]);
 
-/** `import type` 内联风格。 */
+/** 有效的 import type 内联风格值。 */
 const VALID_TYPE_STYLES: ReadonlySet<string> = new Set<TypeImportsStyle>([
   'separate',
   'inline-first',
@@ -77,7 +77,7 @@ function resolveBoolean<K extends keyof SortOptions>(
 }
 
 /**
- * 从 Prettier 选项中提取插件配置，为缺失或非法的参数补上默认值。
+ * 从 Prettier 选项中提取插件配置，缺失或非法的参数会回退为默认值。
  */
 export function resolveSortOptions(
   rawOptions: RawSortOptions,
@@ -114,7 +114,7 @@ export function resolveSortOptions(
   };
 }
 
-/** 向 Prettier 注册的选项。使用功能名词前缀命名，因为 Prettier API 不支持嵌套选项对象。 */
+/** 注册到 Prettier 的选项定义。使用功能名词前缀命名，因为 Prettier API 不支持嵌套的选项对象。 */
 export const options: SupportOptions = {
   importOrder: {
     type: 'boolean',

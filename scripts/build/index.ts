@@ -1,16 +1,15 @@
 import { type BuildConfig, build } from 'bun';
-import { rm } from 'node:fs/promises';
 
-import dts from 'bun-plugin-dts';
+import { dtsPlugin, rmPlugin } from './plugin';
 
-const outdir = 'dist';
-const config = {
+import { compilerOptions } from '~/tsconfig.json';
+
+const config: BuildConfig = {
   entrypoints: ['src/index.ts'],
-  outdir,
-  packages: 'external',
-  plugins: [dts()],
+  outdir: compilerOptions.outDir,
   target: 'node',
-} satisfies BuildConfig;
+  packages: 'external',
+  plugins: [rmPlugin(), dtsPlugin()],
+};
 
-await rm(outdir, { recursive: true, force: true });
 await build(config);

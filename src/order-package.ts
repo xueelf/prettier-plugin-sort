@@ -117,7 +117,7 @@ export const PACKAGE_JSON_TOP_LEVEL_ORDER: readonly string[] = [
 
 /**
  * 值为 `{ name: range }` 映射的依赖表字段。
- * 始终按字母序排列，无法自定义选项修改，因为 npm install 每次会按字母序写回。
+ * 始终按字母序排列，不受用户选项影响——npm install 每次都会按字母序重写。
  * 其他对象字段（scripts、exports 等）不在列表内，其键顺序有运行时语义。
  */
 export const DEPENDENCY_FIELDS: readonly string[] = [
@@ -125,8 +125,6 @@ export const DEPENDENCY_FIELDS: readonly string[] = [
   'devDependencies',
   'peerDependencies',
   'optionalDependencies',
-  'bundledDependencies',
-  'bundleDependencies',
   'resolutions',
   'overrides',
 ];

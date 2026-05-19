@@ -70,6 +70,10 @@ function sortStringArrayAlpha(value: string[]): string[] {
   return [...value].sort((a, b) => a.localeCompare(b, 'en'));
 }
 
+function uniqStringArray(value: string[]): string[] {
+  return [...new Set(value)];
+}
+
 function isPackageJson(filepath: string | undefined): boolean {
   if (!filepath) {
     return false;
@@ -81,6 +85,24 @@ function detectIndent(source: string): string {
   const match = /\n([ \t]+)\S/.exec(source);
   return match ? (match[1] ?? '  ') : '  ';
 }
+
+// 只去重不排序的字符串数组字段。
+const UNIQ_ONLY_FIELDS = new Set([
+  'keywords',
+  'files',
+  'activationEvents',
+]);
+
+// 去重并按字母序排列的字符串数组字段。
+const UNIQ_AND_SORT_FIELDS = new Set([
+  'bundledDependencies',
+  'bundleDependencies',
+  'extensionPack',
+  'extensionDependencies',
+]);
+
+// 不排序也不去重的字符串数组字段。
+const NO_SORT_ARRAY_FIELDS = new Set(['workspaces']);
 
 export function sortPackageJson(
   text: string,
@@ -117,15 +139,30 @@ export function sortPackageJson(
   if (options.packageJsonOrder) {
     result = sortObjectKeysByOrder(result, PACKAGE_JSON_TOP_LEVEL_ORDER);
 
-    // 自动识别纯字符串数组并按字母序排列。
-    // 嵌套对象不递归排序，因为 scripts、exports、imports 等字段的键顺序有运行时语义。
+    // 字符串数组按字段类别采用不同处理策略，对齐 sort-package-json 行为。
+    // keywords、files 等只去重不排序，保留原始语义顺序。
+    // bundledDependencies 等去重后按字母序排列。
+    // workspaces 数组不排序（脚本可能依赖遍历顺序）。
+    // 其余字符串数组按字母序排列。
     for (const [key, value] of Object.entries(result)) {
       if (exclude.has(key)) {
         continue;
       }
-      if (isStringArray(value)) {
-        result[key] = sortStringArrayAlpha(value);
+      if (!isStringArray(value)) {
+        continue;
       }
+      if (NO_SORT_ARRAY_FIELDS.has(key)) {
+        continue;
+      }
+      if (UNIQ_ONLY_FIELDS.has(key)) {
+        result[key] = uniqStringArray(value);
+        continue;
+      }
+      if (UNIQ_AND_SORT_FIELDS.has(key)) {
+        result[key] = sortStringArrayAlpha(uniqStringArray(value));
+        continue;
+      }
+      result[key] = sortStringArrayAlpha(value);
     }
   }
   const indent = detectIndent(text);

@@ -12,7 +12,7 @@ import { splitTopLevel } from './utils';
 
 const NODE_BUILTINS = new Set<string>(builtinModules);
 
-/** 将 import 遵循 eslint-plugin-import import/order 的算法进行分类。 */
+/** 根据导入来源归类为不同分组。分类规则遵循 eslint-plugin-import 的 import/order 算法。 */
 function detectGroup(source: string): ImportGroup {
   // 1. 带运行时前缀的内置模块，以及无前缀的内核模块。
   if (
@@ -79,11 +79,11 @@ interface ParsedImport {
   members: Member[] | null;
   /** ES2023 import attributes，如 `with { type: 'json' }`。`null` 表示无。 */
   attributes: string | null;
-  /** 紧贴在 import 上方的注释，包含末尾换行符。 */
+  /** 紧邻 import 语句上方的注释，包含末尾换行符。 */
   leadingComments: string;
 }
 
-const TYPE_PREFIX = /^type\s+(.+)$/s;
+const TYPE_PREFIX = /^type\s+(.+)$/;
 
 function splitMembers(inner: string): Member[] {
   return splitTopLevel(inner, ',').map<Member>(part => {
@@ -165,13 +165,13 @@ interface ImportBlock {
 }
 
 /**
- * 提取源文本开头的连续 import 块，不走 AST。
+ * 提取源文本顶部连续的 import 声明块。不依赖 AST 解析。
  *
  * 使用带 `y` 标志的 sticky 正则从游标处逐段推进，避免每轮循环对剩余文本 `slice`。
  * 将 O(N²) 的字符串复制降为 O(N)。
  */
 function extractImportBlock(text: string): ImportBlock | null {
-  // `import\b(?![.(])` 排除 `import.meta` 与动态 `import('mod')`，避免被当作导入语句误吃。
+  // `import\b(?![.(])` 排除 `import.meta` 与动态 `import('mod')`，避免被当作导入语句误解析。
   const firstRe =
     /(?:^|\n)(?:[ \t]*(?:\/\/[^\n]*|\/\*[\s\S]*?\*\/)[ \t]*\n)*[ \t]*import\b(?![.(])/;
   const first = firstRe.exec(text);
@@ -182,8 +182,8 @@ function extractImportBlock(text: string): ImportBlock | null {
   const start = first.index + (text[first.index] === '\n' ? 1 : 0);
   const statements: RawStatement[] = [];
 
-  // 消耗语句间区域（空行和独立注释）
-  // 第一个空行以内紧贴在下一个 import 上方的注释会被捕获并重新附加，避免排序后丢失。
+  // 跳过空行以及独立的注释行
+  // 紧邻下一个 import 上方、第一个空行以内的注释会被捕获并重新附加，避免排序后丢失。
   const skipRe = /(?:[ \t]*(?:\/\/[^\n]*|\/\*[\s\S]*?\*\/)?[ \t]*\n)*/y;
   const importRe =
     /[ \t]*(import\b(?![.(])[\s\S]*?(?:from\s*(['"])[^'"]+\2|(['"])[^'"]+\3)(?:\s+with\s*\{[^}]*\})?\s*;?)/y;
@@ -207,11 +207,8 @@ function extractImportBlock(text: string): ImportBlock | null {
     const leadingLines: string[] = [];
 
     for (let i = commentLines.length - 1; i >= 0; i--) {
-      const line = commentLines[i];
+      const line = commentLines[i]!;
 
-      if (line === undefined) {
-        continue;
-      }
       if (line.trim() === '') {
         break;
       }
@@ -241,7 +238,7 @@ function renderMembers(members: Member[]): string {
     .join(', ');
 }
 
-/** 组装 `default, * as ns, { members }` 形式的导出符列表。 */
+/** 拼接 `default, * as ns, { members }` 格式的 specifier 列表。 */
 function renderSpecifiers(importDecl: ParsedImport): string {
   const parts: string[] = [];
 
@@ -291,12 +288,11 @@ function normalizeTypeClause(importDecl: ParsedImport): ParsedImport {
 }
 
 /**
- * 将来源相同的多条 import 合并为一条。
- * 副作用导入（`import 'mod'`）顺序有语义，永不参与合并。
+ * 将来源相同的多条 import 合并为一条。不合并 side-effect import 和 import type default/namespace 导入。
+ * 合并键包含 attributes，`with { type: 'json' }` 与不带 attributes 语义不同，强行合并会导致语句丢失。
  * 合并后再交给 applyTypeImports，separate 模式下依然会把 type 和值拆回两条。
  */
 function mergeImportsFromSameSource(imports: ParsedImport[]): ParsedImport[] {
-  // 合并键包含 attributes：`with { type: 'json' }` 与不带 attributes 是不同语义，强合并会导致语句丢失。
   const indexByKey = new Map<string, number>();
   const result: ParsedImport[] = [];
 
@@ -319,7 +315,7 @@ function mergeImportsFromSameSource(imports: ParsedImport[]): ParsedImport[] {
     }
     const existing = result[existingIndex]!;
 
-    // 两条中最多只有一条能合法地带 defaultSpec / namespaceSpec，冲突时以首条为准。
+    // 正常情况只有一条可能包含 defaultSpec / namespaceSpec；如有冲突以首条为准。
     // attributes 必然相同（已编入 mergeKey），直接复用 existing 的即可。
     result[existingIndex] = {
       source: existing.source,
@@ -332,7 +328,7 @@ function mergeImportsFromSameSource(imports: ParsedImport[]): ParsedImport[] {
           ? null
           : [...(existing.members ?? []), ...(importDecl.members ?? [])],
       attributes: existing.attributes,
-      // 后续重复条目的注释静默丢弃。
+      // 后续重复条目的注释直接丢弃。
       leadingComments: existing.leadingComments,
     };
   }
@@ -387,7 +383,7 @@ function applyTypeImports(
         ...importDecl,
         members:
           valueMembers.length > 0 ? sortMembersAlpha(valueMembers) : null,
-        // 避免在两半部分都复制相同的首行注释。
+        // 避免在两个拆分出的语句中都出现相同的首行注释。
         leadingComments:
           typeMembers.length > 0 ? '' : importDecl.leadingComments,
       });
@@ -539,8 +535,7 @@ export function sortImports(text: string, rawOptions: ParserOptions): string {
   }
 
   const allLines: string[] = [];
-  // segment 和副作用导入之间插空行，但连续的副作用导入相邻不插。
-  // 由于两个非空 segment 按构造方式不会相邻，等价于“chunk 类型跳变时插入空行”。
+  // chunk 类型切换时插入空行（连续的副作用 import 之间不插）。
   let previousKind: Chunk['kind'] | null = null;
 
   for (const chunk of chunks) {
@@ -564,7 +559,9 @@ export function sortImports(text: string, rawOptions: ParserOptions): string {
   const replacement = allLines.join('\n');
   const trailing = text.slice(block.end);
   // 当 import 块后还有其他代码时，保证两者之间始终有一个空行。
-  const suffix = trailing.trim() ? '\n\n' + trailing.trimStart() : trailing;
+  const nonBlankIndex = trailing.search(/\S/);
+  const suffix =
+    nonBlankIndex >= 0 ? '\n\n' + trailing.slice(nonBlankIndex) : trailing;
 
   return text.slice(0, block.start) + replacement + suffix;
 }
