@@ -232,4 +232,14 @@ describe('sort package.json', () => {
     const out = JSON.parse(await format(input));
     expect(Object.keys(out)).toEqual(['name', 'version', 'acustom', 'zcustom']);
   });
+
+  test('preserves CRLF line endings when endOfLine is crlf', async () => {
+    const input = JSON.stringify(
+      { name: 'pkg', version: '1.0.0' },
+      null,
+      2,
+    );
+    const out = await format(input, { endOfLine: 'crlf' });
+    expect(out.endsWith('\r\n')).toBe(true);
+  });
 });
