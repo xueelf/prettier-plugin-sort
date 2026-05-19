@@ -114,12 +114,12 @@ function hasSequentialScript(pkg: Record<string, JsonValue>): boolean {
   ) {
     return false;
   }
-  const scripts = (['scripts', 'betterScripts'] as const).flatMap((field) => {
+  const scripts = (['scripts', 'betterScripts'] as const).flatMap(field => {
     const obj = pkg[field];
     return isPlainObject(obj) ? Object.values(obj) : [];
   });
   return scripts.some(
-    (script) =>
+    script =>
       typeof script === 'string' &&
       script.includes('*') &&
       RUN_S_PATTERN.test(script),
@@ -157,20 +157,16 @@ function sortScriptNames(keys: string[], prefix = ''): string[] {
 
   return [...groupMap.keys()]
     .sort((a, b) => a.localeCompare(b, 'en'))
-    .flatMap((groupKey) => {
+    .flatMap(groupKey => {
       const children = groupMap.get(groupKey)!;
       if (
         children.length > 1 &&
-        children.some(
-          (key) => key !== groupKey && key.startsWith(groupKey + ':'),
-        )
+        children.some(key => key !== groupKey && key.startsWith(groupKey + ':'))
       ) {
         const direct = children
-          .filter((key) => key === groupKey || !key.startsWith(groupKey + ':'))
+          .filter(key => key === groupKey || !key.startsWith(groupKey + ':'))
           .sort((a, b) => a.localeCompare(b, 'en'));
-        const nested = children.filter((key) =>
-          key.startsWith(groupKey + ':'),
-        );
+        const nested = children.filter(key => key.startsWith(groupKey + ':'));
         return [...direct, ...sortScriptNames(nested, groupKey)];
       }
       return children.sort((a, b) => a.localeCompare(b, 'en'));
@@ -191,7 +187,7 @@ function sortScripts(
   const prefixable = new Set<string>();
 
   // 将 pre/post 前缀脚本映射到基础名。
-  const normalized = names.map((name) => {
+  const normalized = names.map(name => {
     const base = name.replace(/^(?:pre|post)/, '');
     if (DEFAULT_NPM_SCRIPTS.has(base) || names.includes(base)) {
       prefixable.add(base);
@@ -209,14 +205,43 @@ function sortScripts(
   }
 
   // 展开 pre/post 前缀。
-  const orderedNames = sortedNames.flatMap((key) =>
+  const orderedNames = sortedNames.flatMap(key =>
     prefixable.has(key) ? [`pre${key}`, key, `post${key}`] : [key],
   );
 
   return Object.fromEntries(
     orderedNames
-      .filter((name) => Object.hasOwn(scripts, name))
-      .map((name) => [name, scripts[name]!]),
+      .filter(name => Object.hasOwn(scripts, name))
+      .map(name => [name, scripts[name]!]),
+  );
+}
+
+/**
+ * 排序 exports 字段的键名，对齐 sort-package-json 行为：
+ * - `.` 开头的路径优先，按字母序排列
+ * - 条件名（import、require、node 等）在后，其中 default 移至末尾
+ * - 递归排序嵌套的 export 对象
+ */
+function sortExportsField(
+  exports: Record<string, JsonValue>,
+): Record<string, JsonValue> {
+  const keys = Object.keys(exports);
+  const paths = keys.filter(key => key.startsWith('.')).sort();
+  const conditions = keys.filter(key => !key.startsWith('.')).sort();
+  const defaultIndex = conditions.indexOf('default');
+
+  if (defaultIndex >= 0) {
+    conditions.splice(defaultIndex, 1);
+    conditions.push('default');
+  }
+
+  const orderedKeys = [...paths, ...conditions];
+
+  return Object.fromEntries(
+    orderedKeys.map(key => {
+      const value = exports[key]!;
+      return [key, isPlainObject(value) ? sortExportsField(value) : value] as const;
+    }),
   );
 }
 
@@ -272,9 +297,23 @@ export function sortPackageJson(
     // scripts / betterScripts 键名按命名空间分组排序。
     for (const field of ['scripts', 'betterScripts'] as const) {
       const scripts = result[field];
-      if (scripts !== undefined && isPlainObject(scripts) && !exclude.has(field)) {
+      if (
+        scripts !== undefined &&
+        isPlainObject(scripts) &&
+        !exclude.has(field)
+      ) {
         result[field] = sortScripts(scripts, result);
       }
+    }
+
+    // exports 字段键名按路径优先排序。
+    const exportsValue = result['exports'];
+    if (
+      exportsValue !== undefined &&
+      isPlainObject(exportsValue) &&
+      !exclude.has('exports')
+    ) {
+      result['exports'] = sortExportsField(exportsValue);
     }
 
     // 字符串数组按字段类别采用不同处理策略，对齐 sort-package-json 行为。
