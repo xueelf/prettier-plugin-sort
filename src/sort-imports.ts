@@ -31,11 +31,7 @@ function detectGroup(source: string): ImportGroup {
   }
 
   // 2. 当前目录的 index 模块。
-  if (
-    source === '.' ||
-    source === './' ||
-    INDEX_PATTERN.test(source)
-  ) {
+  if (source === '.' || source === './' || INDEX_PATTERN.test(source)) {
     return 'index';
   }
 
