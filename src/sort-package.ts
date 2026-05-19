@@ -240,7 +240,10 @@ function sortExportsField(
   return Object.fromEntries(
     orderedKeys.map(key => {
       const value = exports[key]!;
-      return [key, isPlainObject(value) ? sortExportsField(value) : value] as const;
+      return [
+        key,
+        isPlainObject(value) ? sortExportsField(value) : value,
+      ] as const;
     }),
   );
 }
@@ -258,6 +261,11 @@ const UNIQ_AND_SORT_FIELDS = new Set([
 
 // 不排序也不去重的字符串数组字段。
 const NO_SORT_ARRAY_FIELDS = new Set(['workspaces']);
+
+function detectNewline(source: string): string {
+  const crlfIndex = source.indexOf('\r\n');
+  return crlfIndex >= 0 ? '\r\n' : '\n';
+}
 
 export function sortPackageJson(
   text: string,
@@ -343,7 +351,13 @@ export function sortPackageJson(
     }
   }
   const indent = detectIndent(text);
+  const newline = detectNewline(text);
   const output = JSON.stringify(result, null, indent);
 
-  return text.endsWith('\n') ? output + '\n' : output;
+  if (text.endsWith(newline)) {
+    return newline === '\r\n'
+      ? output.replace(/\n/g, '\r\n') + '\r\n'
+      : output + '\n';
+  }
+  return newline === '\r\n' ? output.replace(/\n/g, '\r\n') : output;
 }
