@@ -20,7 +20,7 @@ describe('sort exports', () => {
   });
 
   test('sorts re-exports from another module', async () => {
-    const input = "export { a, d } from 'mod';\n";
+    const input = "export { d, a } from 'mod';\n";
     const out = await format(input);
     expect(out).toBe("export { a, d } from 'mod';\n");
   });
@@ -67,6 +67,12 @@ describe('sort exports', () => {
   test('export type * from is not touched', async () => {
     const input = "export type * from 'mod';\n";
     expect(await format(input)).toBe(input);
+  });
+
+  test('sorts mixed type and value specifiers', async () => {
+    const input = 'export { b, type A };\n';
+    const out = await format(input);
+    expect(out).toBe('export { type A, b };\n');
   });
 
   test('empty export ({}) is left untouched', async () => {
