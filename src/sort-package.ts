@@ -118,11 +118,13 @@ function hasSequentialScript(
   ) {
     return false;
   }
-  const scripts = (['scripts', 'betterScripts'] as const).flatMap(field => {
-    const scriptsObject = packageObject[field];
-    return isPlainObject(scriptsObject) ? Object.values(scriptsObject) : [];
-  });
-  return scripts.some(
+  const scriptCommands = (['scripts', 'betterScripts'] as const).flatMap(
+    field => {
+      const scriptsObject = packageObject[field];
+      return isPlainObject(scriptsObject) ? Object.values(scriptsObject) : [];
+    },
+  );
+  return scriptCommands.some(
     script =>
       typeof script === 'string' &&
       script.includes('*') &&
@@ -308,13 +310,13 @@ export function sortPackageJson(
 
     // scripts / betterScripts 键名按命名空间分组排序。
     for (const field of ['scripts', 'betterScripts'] as const) {
-      const scripts = result[field];
+      const scriptsValue = result[field];
       if (
-        scripts !== undefined &&
-        isPlainObject(scripts) &&
+        scriptsValue !== undefined &&
+        isPlainObject(scriptsValue) &&
         !exclude.has(field)
       ) {
-        result[field] = sortScripts(scripts, result);
+        result[field] = sortScripts(scriptsValue, result);
       }
     }
 
