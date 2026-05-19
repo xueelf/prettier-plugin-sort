@@ -5,9 +5,9 @@ import { splitTopLevel } from './utils';
 
 /**
  * 按字母序排列 `export { … }` 花括号内的命名导出。
- * 不挪动语句位置，不跨语句合并，只针对单条 export 语句的花括号内部。
+ * 不改变语句位置，不跨语句合并，只针对单条 export 语句的花括号内部。
  *
- * 覆盖：
+ * 覆盖的语法形式：
  *   export { a, b };
  *   export { a, b } from 'mod';
  *   export type { A, B };

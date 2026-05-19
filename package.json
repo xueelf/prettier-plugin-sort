@@ -35,24 +35,25 @@
     "dist"
   ],
   "scripts": {
-    "build": "bun run scripts/build/index.ts",
-    "format": "prettier \"{src,scripts}/**/*.ts\" \"*.ts\" --write",
-    "lint": "eslint \"{src,scripts}/**/*.ts\" \"*.ts\"",
+    "build": "bun run scripts/build/",
+    "format": "prettier **/*.ts --write",
+    "lint": "eslint **/*.ts",
     "prepare": "husky",
-    "test": "bun test"
+    "test": "bun test scripts/test/",
+    "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
     "@commitlint/cli": "^21.0.1",
     "@commitlint/config-conventional": "^21.0.1",
     "@commitlint/types": "^21.0.1",
     "@eslint/js": "^10.0.1",
-    "@types/bun": "^1.3.13",
-    "bun-plugin-dts": "^0.4.0",
-    "eslint": "^10.2.1",
+    "@types/bun": "^1.3.14",
+    "annal": "^0.0.2",
+    "eslint": "^10.4.0",
     "husky": "^9.1.7",
     "prettier": "^3.8.3",
     "typescript": "^6.0.3",
-    "typescript-eslint": "^8.59.0"
+    "typescript-eslint": "^8.59.3"
   },
   "peerDependencies": {
     "prettier": ">=3.0.0"
@@ -60,11 +61,11 @@
   "devEngines": {
     "runtime": {
       "name": "bun",
-      "onFail": "warn"
+      "onFail": "error"
     },
     "packageManager": {
       "name": "bun",
-      "onFail": "warn"
+      "onFail": "error"
     }
   }
 }
