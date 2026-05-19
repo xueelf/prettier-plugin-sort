@@ -87,11 +87,7 @@ function detectIndent(source: string): string {
 }
 
 // 只去重不排序的字符串数组字段。
-const UNIQ_ONLY_FIELDS = new Set([
-  'keywords',
-  'files',
-  'activationEvents',
-]);
+const UNIQ_ONLY_FIELDS = new Set(['keywords', 'files', 'activationEvents']);
 
 // 去重并按字母序排列的字符串数组字段。
 const UNIQ_AND_SORT_FIELDS = new Set([
