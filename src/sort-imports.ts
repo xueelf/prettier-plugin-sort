@@ -354,10 +354,10 @@ function applyTypeImports(
     }
     const typeMembers = importDecl.members.filter(member => member.isType);
     const valueMembers = importDecl.members.filter(member => !member.isType);
-    const out: ParsedImport[] = [];
+    const output: ParsedImport[] = [];
 
     if (typeMembers.length > 0) {
-      out.push({
+      output.push({
         source: importDecl.source,
         typeClause: true,
         sideEffect: false,
@@ -376,7 +376,7 @@ function applyTypeImports(
       importDecl.namespaceSpec !== null;
 
     if (hasValueBody) {
-      out.push({
+      output.push({
         ...importDecl,
         members:
           valueMembers.length > 0 ? sortMembersAlpha(valueMembers) : null,
@@ -385,7 +385,7 @@ function applyTypeImports(
           typeMembers.length > 0 ? '' : importDecl.leadingComments,
       });
     }
-    return out.length > 0 ? out : [importDecl];
+    return output.length > 0 ? output : [importDecl];
   }
 
   // inline 模式：将 `import type { X, Y }` 改写为 `import { type X, type Y }`。
@@ -431,10 +431,10 @@ function sortSegment(
     return [];
   }
   const style = options.importOrderTypeImports;
-  const deduped = options.importOrderMergeDuplicates
+  const deduplicated = options.importOrderMergeDuplicates
     ? mergeImportsFromSameSource(imports)
     : imports;
-  const rewritten = deduped.flatMap(importDecl =>
+  const rewritten = deduplicated.flatMap(importDecl =>
     applyTypeImports(importDecl, style),
   );
   const decorated = rewritten.map((importDecl, index) => ({

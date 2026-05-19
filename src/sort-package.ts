@@ -72,7 +72,7 @@ function sortStringArrayAlpha(value: string[]): string[] {
   return [...value].sort((a, b) => a.localeCompare(b, 'en'));
 }
 
-function uniqStringArray(value: string[]): string[] {
+function uniqueStringArray(value: string[]): string[] {
   return [...new Set(value)];
 }
 
@@ -107,18 +107,20 @@ const DEFAULT_NPM_SCRIPTS = new Set([
 const RUN_S_PATTERN =
   /(?<=^|[\s&;<>|(])(?:run-s|npm-run-all2? .*(?:--sequential|--serial|-s))(?=$|[\s&;<>|)])/;
 
-function hasSequentialScript(pkg: Record<string, JsonValue>): boolean {
-  const devDeps = pkg['devDependencies'];
+function hasSequentialScript(
+  packageObject: Record<string, JsonValue>,
+): boolean {
+  const devDependencies = packageObject['devDependencies'];
   if (
-    !isPlainObject(devDeps) ||
-    (!Object.hasOwn(devDeps, 'npm-run-all') &&
-      !Object.hasOwn(devDeps, 'npm-run-all2'))
+    !isPlainObject(devDependencies) ||
+    (!Object.hasOwn(devDependencies, 'npm-run-all') &&
+      !Object.hasOwn(devDependencies, 'npm-run-all2'))
   ) {
     return false;
   }
   const scripts = (['scripts', 'betterScripts'] as const).flatMap(field => {
-    const obj = pkg[field];
-    return isPlainObject(obj) ? Object.values(obj) : [];
+    const scriptsObject = packageObject[field];
+    return isPlainObject(scriptsObject) ? Object.values(scriptsObject) : [];
   });
   return scripts.some(
     script =>
@@ -183,7 +185,7 @@ function sortScriptNames(keys: string[], prefix = ''): string[] {
  */
 function sortScripts(
   scripts: Record<string, JsonValue>,
-  pkg: Record<string, JsonValue>,
+  packageObject: Record<string, JsonValue>,
 ): Record<string, JsonValue> {
   const names = Object.keys(scripts);
   const prefixable = new Set<string>();
@@ -200,7 +202,7 @@ function sortScripts(
 
   // 如果使用了 run-s 顺序执行，保持原有顺序否则按命名空间排序。
   let sortedNames: string[];
-  if (hasSequentialScript(pkg)) {
+  if (hasSequentialScript(packageObject)) {
     sortedNames = [...new Set(normalized)];
   } else {
     sortedNames = sortScriptNames(normalized);
@@ -251,10 +253,10 @@ function sortExportsField(
 }
 
 // 只去重不排序的字符串数组字段。
-const UNIQ_ONLY_FIELDS = new Set(['keywords', 'files', 'activationEvents']);
+const UNIQUE_ONLY_FIELDS = new Set(['keywords', 'files', 'activationEvents']);
 
 // 去重并按字母序排列的字符串数组字段。
-const UNIQ_AND_SORT_FIELDS = new Set([
+const UNIQUE_AND_SORT_FIELDS = new Set([
   'bundledDependencies',
   'bundleDependencies',
   'extensionPack',
@@ -341,12 +343,12 @@ export function sortPackageJson(
       if (NO_SORT_ARRAY_FIELDS.has(key)) {
         continue;
       }
-      if (UNIQ_ONLY_FIELDS.has(key)) {
-        result[key] = uniqStringArray(value);
+      if (UNIQUE_ONLY_FIELDS.has(key)) {
+        result[key] = uniqueStringArray(value);
         continue;
       }
-      if (UNIQ_AND_SORT_FIELDS.has(key)) {
-        result[key] = sortStringArrayAlpha(uniqStringArray(value));
+      if (UNIQUE_AND_SORT_FIELDS.has(key)) {
+        result[key] = sortStringArrayAlpha(uniqueStringArray(value));
         continue;
       }
       result[key] = sortStringArrayAlpha(value);
