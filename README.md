@@ -283,9 +283,10 @@ Top-level key order follows the field list maintained by [sort-package-json](htt
 Rules the plugin follows:
 
 - Top-level keys are reordered to the canonical sequence (`name` → `version` → ... → `dependencies`)
-- Top-level string-only arrays are sorted alphabetically, e.g. `keywords`, `files`
+- `scripts` and `betterScripts` keys are sorted with pre/post lifecycle grouping and `:` namespace ordering
+- `exports` keys are sorted: path subkeys first, conditions alphabetically with `default` moved to the end; nested export maps are recursively sorted
 - `dependencies`, `devDependencies`, `peerDependencies` and other dependency maps are always sorted alphabetically, even if `packageJsonOrder` is set to `false`, because `npm install` rewrites them in alphabetical order every time
-- `scripts`, `exports`, `imports` and other nested objects are not sorted recursively, because their key order carries runtime semantics
+- String arrays are handled by field: `keywords`, `files`, `activationEvents` are deduplicated preserving original order; `bundledDependencies`, `bundleDependencies`, `extensionPack`, `extensionDependencies` are deduplicated then sorted; `workspaces` arrays are left untouched; all other string arrays are sorted alphabetically
 - Use `packageJsonOrderExcludeKeys` to opt specific top-level keys out of sorting entirely
 
 ## Options
@@ -300,7 +301,7 @@ Prettier plugin options are flat, so these options are prefixed with `importOrde
 | `importOrderTypeImports`      | How to place `type` imports: `separate`, `inline-first`, `inline-last`, `mixed`            | `"separate"`                                            |
 | `importOrderMergeDuplicates`  | Merge multiple `import` statements from the same source (except side-effect imports)       | `true`                                                  |
 | `exportOrder`                 | Sort named specifiers inside `export { … }` alphabetically                                 | `true`                                                  |
-| `packageJsonOrder`            | Sort top-level keys and string arrays in `package.json`                                    | `true`                                                  |
+| `packageJsonOrder`            | Sort top-level keys, scripts/exports subkeys, and string arrays in `package.json`            | `true`                                                  |
 | `packageJsonOrderExcludeKeys` | Top-level `package.json` keys to leave untouched                                           | `[]`                                                    |
 
 ## Example

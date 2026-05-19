@@ -286,9 +286,10 @@ export { type FC, useEffect, useState } from 'react';
 排序规则：
 
 - 顶层字段按常用顺序排列（`name` → `version` → ... → `dependencies`）
-- 顶层的纯字符串数组按字母序排列，如 `keywords`、`files`
+- `scripts` 和 `betterScripts` 的键名按 pre/post 生命周期包围和 `:` 命名空间分组排序
+- `exports` 键按路径优先、条件字母序、`default` 置底排序，嵌套的 export 对象递归处理
 - `dependencies`、`devDependencies`、`peerDependencies` 等依赖表永远按字母序排列，即使 `packageJsonOrder` 设为 `false` 也不例外。因为 `npm install` 每次都会按照字母序写回
-- `scripts`、`exports`、`imports` 等嵌套对象不会递归排序，它们的键顺序有运行时语义
+- 字符串数组按字段分类处理：`keywords`、`files`、`activationEvents` 只去重不排序，保留原始语义顺序；`bundledDependencies`、`bundleDependencies`、`extensionPack`、`extensionDependencies` 去重后按字母序排列；`workspaces` 数组不排序；其余字符串数组按字母序排列
 - 想让某些顶层字段完全跳过排序，可以在 `packageJsonOrderExcludeKeys` 里列出
 
 ## 配置项
@@ -303,7 +304,7 @@ Prettier 的插件选项是扁平的，所以这些配置都以 `importOrder`、
 | `importOrderTypeImports`      | `type` import 的处理方式：`separate`、`inline-first`、`inline-last`、`mixed`   | `"separate"`                                            |
 | `importOrderMergeDuplicates`  | 是否合并同来源的多条 import 语句（副作用导入除外）                             | `true`                                                  |
 | `exportOrder`                 | 是否按字母序排列 `export { … }` 花括号内的命名导出                             | `true`                                                  |
-| `packageJsonOrder`            | 是否排序 package.json 的顶层字段和字符串数组                                   | `true`                                                  |
+| `packageJsonOrder`            | 是否排序 package.json 的顶层字段、scripts/exports 子键和字符串数组                          | `true`                                                  |
 | `packageJsonOrderExcludeKeys` | 不参与 package.json 排序的顶层字段                                             | `[]`                                                    |
 
 ## 示例
