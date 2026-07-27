@@ -1,2 +1,4 @@
-bun lint
-bun format
+bun run lint
+bun run typecheck
+bun run test
+bun run build

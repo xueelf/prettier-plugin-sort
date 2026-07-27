@@ -35,9 +35,10 @@
     "dist"
   ],
   "scripts": {
-    "build": "bun run scripts/build/",
-    "format": "prettier **/*.ts --write",
-    "lint": "eslint **/*.ts",
+    "build": "bun run scripts/build.ts",
+    "format": "prettier **/*.{json,ts,md} --write --experimental-cli",
+    "lint": "eslint src/ --cache",
+    "lint:fix": "eslint src/ --fix --cache",
     "prepare": "husky",
     "test": "bun test tests/",
     "typecheck": "tsc --noEmit"
