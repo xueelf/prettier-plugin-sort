@@ -2,20 +2,20 @@
 
 A [Prettier](https://prettier.io/) plugin focused on sorting.
 
-- Sort `import` declarations in JS / TS files
-- Sort named specifiers inside `export { … }`
-- Sort top-level keys, string arrays, and dependency maps in `package.json`
-- Zero runtime dependencies
+- Sort top-level `import` and `export { ... }` in JavaScript, TypeScript, and Flow
+- Sort fields in `package.json`
 
 Read this in other languages: English | [中文](./README.zh.md)
 
 ## Install
 
+Requires Prettier 3.7 or newer.
+
 ```shell
 npm i -D prettier prettier-plugin-sort
 ```
 
-Enable it in your Prettier config:
+Add the plugin to your Prettier config:
 
 ```json
 {
@@ -23,74 +23,92 @@ Enable it in your Prettier config:
 }
 ```
 
-Then run Prettier as usual, for example `npx prettier --write .`.
+## Scope
 
-## What gets sorted
+ES module sorting supports these Prettier parsers:
 
-### Imports
+- `babel`
+- `babel-flow`
+- `babel-ts`
+- `typescript`
+- `flow`
+- `acorn`
+- `espree`
+- `meriyah`
 
-#### Grouping and sorting
+The same sorting also applies to **embedded** JavaScript and TypeScript in Vue or Markdown.
 
-With the default config, imports are grouped and ordered like this.
+The plugin only handles ES module syntax. CommonJS `require()` and `module.exports`, along with TypeScript `export =`, remain unchanged.
 
-Before:
+`package.json` sorting is enabled for these Prettier parsers:
+
+- `json`
+- `json-stringify`
+
+Sorting is enabled only when the file is named `package.json`.
+
+## Options
+
+| Option                   | Type              | Default                                                 | Description                                                              |
+| ------------------------ | ----------------- | ------------------------------------------------------- | ------------------------------------------------------------------------ |
+| `esmImportSort`          | `boolean`         | `true`                                                  | Group and sort top-level static imports and the specifiers inside braces |
+| `esmImportGroups`        | `ImportGroup[]`   | `["builtin", "external", "parent", "sibling", "index"]` | Set the order of import groups                                           |
+| `esmImportSeparation`    | `boolean`         | `true`                                                  | Add blank lines between groups and above and below side-effect imports   |
+| `esmImportTypeStyle`     | `TypeImportStyle` | `"separate"`                                            | Control the form and order of type-only imports                          |
+| `esmImportMerge`         | `boolean`         | `true`                                                  | Safely merge imports from the same module                                |
+| `esmExportSpecifierSort` | `boolean`         | `true`                                                  | Sort specifiers inside `export { ... }`                                  |
+| `packageSort`            | `boolean`         | `true`                                                  | Sort fields in `package.json`                                            |
+
+## Import sorting
+
+The plugin groups and sorts top-level static imports. It also sorts the specifiers inside braces. Import specifiers that use `as` are sorted by their local names.
+
+The plugin leaves dynamic `import()` calls and import-like text in strings or comments unchanged. Set `esmImportSort` to `false` to disable all import sorting.
+
+The plugin collects static imports separated by other top-level statements at the first import position, then sorts them.
+
+Before sorting:
 
 <!-- prettier-ignore -->
 ```typescript
-import App from './App.tsx';
+import App from './App';
 import fs from 'node:fs';
-import lodash from 'lodash';
-import path from 'node:path';
 import react from 'react';
 ```
 
-After:
+After sorting:
 
 ```typescript
 import fs from 'node:fs';
-import path from 'node:path';
 
-import lodash from 'lodash';
 import react from 'react';
 
-import App from './App.tsx';
+import App from './App';
 ```
 
-Each import belongs to a group. For example, `node:fs` is a `builtin` (covers Node.js and Bun **runtime** built-ins), while `react` and `lodash` are `external` npm packages. The plugin first classifies each import by group, then sorts alphabetically within each group.
+### Grouping
 
-Grouping and ordering follow the conventions of [eslint-plugin-import](https://github.com/import-js/eslint-plugin-import)'s [import/order](https://github.com/import-js/eslint-plugin-import/blob/main/docs/rules/order.md) rule.
+`esmImportGroups` accepts these values:
 
-The default import config is:
+| Group      | Matches                                                        |
+| ---------- | -------------------------------------------------------------- |
+| `builtin`  | Modules beginning with `node:` or `bun:`, plus `bun`           |
+| `external` | Packages and module paths not matched by any other group       |
+| `internal` | Module paths beginning with `/`, `~`, `@/`, or `#`             |
+| `parent`   | Parent-relative paths such as `../utils`                       |
+| `sibling`  | Sibling paths such as `./Button`                               |
+| `index`    | `.`, `./`, `./index`, and `./index` with an optional extension |
+
+Modern Node.js code should reference built-ins explicitly with [`node:` URLs](https://nodejs.org/api/esm.html#node-imports). The plugin also classifies only `node:`-prefixed Node.js built-ins as `builtin`. Module specifiers without the prefix, such as `fs` and `path`, belong to `external`.
+
+The plugin removes duplicate entries and appends omitted default groups in their default order. The default configuration does not include `internal`, so it sorts last unless explicitly added.
+
+Projects that use one of these path aliases can add `internal`:
 
 ```json
 {
   "plugins": ["prettier-plugin-sort"],
-  "importOrderGroups": ["builtin", "external", "parent", "sibling", "index"],
-  "importOrderSeparation": true,
-  "importOrderTypeImports": "separate",
-  "importOrderMergeDuplicates": true
-}
-```
-
-Group matchers:
-
-| Group      | Matches                                                     | Examples                           |
-| ---------- | ----------------------------------------------------------- | ---------------------------------- |
-| `builtin`  | `node:*`, `bun:*`, `bun`, and unprefixed Node built-ins     | `node:fs`, `path`, `bun`           |
-| `external` | npm packages, and anything that doesn't match another group | `react`, `@scope/pkg`              |
-| `internal` | Project absolute paths and aliases                          | `/utils`, `~/app`, `@/shared`      |
-| `parent`   | Parent-relative paths                                       | `../Button`                        |
-| `sibling`  | Sibling paths (excluding index)                             | `./Icon`                           |
-| `index`    | Current directory index                                     | `.`, `./`, `./index`, `./index.ts` |
-
-> **Note on `internal` detection:** the plugin currently uses hardcoded specifier prefixes (`/`, `~`, `@/`) and does not read `tsconfig paths` or any bundler config. An `importOrderInternalPatterns` option for custom regex matching may be added in a future release.
-
-Reorder or drop groups through `importOrderGroups`. For example, adding `internal` explicitly:
-
-```json
-{
-  "plugins": ["prettier-plugin-sort"],
-  "importOrderGroups": [
+  "esmImportGroups": [
     "builtin",
     "external",
     "internal",
@@ -101,232 +119,92 @@ Reorder or drop groups through `importOrderGroups`. For example, adding `interna
 }
 ```
 
-Before:
+The plugin does not read `compilerOptions.paths` or resolve aliases from bundler configuration.
 
-<!-- prettier-ignore -->
-```typescript
-import App from './App.tsx';
-import react from 'react';
-import shared from '@/shared';
-```
+Set `esmImportSeparation` to `false` to remove blank lines between groups and above and below side-effect imports.
 
-After:
+### Type-only import style
 
-<!-- prettier-ignore -->
-```typescript
-import react from 'react';
+`esmImportTypeStyle` controls how type-only imports are written and accepts four values:
 
-import shared from '@/shared';
-
-import App from './App.tsx';
-```
-
-Set `importOrderSeparation` to `false` if you don't want blank lines between groups.
-
-#### Type imports
-
-By default the plugin splits `type` imports into their own statement.
-
-Before:
-
-<!-- prettier-ignore -->
-```typescript
-import { useState, type FC } from 'react';
-```
-
-After:
-
-<!-- prettier-ignore -->
-```typescript
-import type { FC } from 'react';
-import { useState } from 'react';
-```
-
-The shape of `importOrderTypeImports` mirrors conventions in the ESLint ecosystem, especially the `fixStyle` option of [@typescript-eslint/consistent-type-imports](https://typescript-eslint.io/rules/consistent-type-imports).
-
-Using `import { c, type B, a } from 'mod';` as an example:
-
-| Mode           | Result                                                           |
+| Value          | Input: `import { c, type B, a } from 'mod'`                      |
 | -------------- | ---------------------------------------------------------------- |
 | `separate`     | `import type { B } from 'mod';`<br>`import { a, c } from 'mod';` |
 | `inline-first` | `import { type B, a, c } from 'mod';`                            |
 | `inline-last`  | `import { a, c, type B } from 'mod';`                            |
 | `mixed`        | `import { a, type B, c } from 'mod';`                            |
 
-`separate`, `inline-first`, and `inline-last` sort type and value specifiers independently within their own group. `mixed` sorts all specifiers together alphabetically (case-insensitive), keeping the `type` keyword inline where needed.
+`separate` is the default. Type-only default and namespace imports keep their original form.
 
-#### Merging same-source imports
+### Merging and sorting boundaries
 
-By default, multiple `import` statements from the same source are merged into one.
+With `esmImportMerge` enabled, imports from the same module are merged when it is safe to do so.
 
-Before:
+The plugin does not merge imports with different import attributes, comments that cannot move safely, or conflicting default or namespace bindings. Side-effect imports also remain separate.
 
-<!-- prettier-ignore -->
-```typescript
-import { useState } from 'react';
-import { useEffect } from 'react';
-```
+Sorting never crosses these boundaries:
 
-After:
+- Side-effect import order can affect CSS cascading or polyfill loading, so these imports are not sorted. They keep their relative positions and separate the sorting segments around them.
+- A declaration marked with `prettier-ignore` stays unchanged. Imports before and after it are sorted separately.
+- A standalone comment separates the imports before and after it. A comment attached to an import moves with that declaration.
+- The plugin preserves shebangs, Prettier file pragmas, and position-sensitive ESLint directives.
+- Specialized declarations such as `import source`, `import defer`, and Flow `import typeof` may be reordered as a whole. The plugin never rewrites or merges them.
 
-```typescript
-import { useEffect, useState } from 'react';
-```
+## Export sorting
 
-`importOrderMergeDuplicates` only handles the merge step itself. The arrangement inside the braces is entirely controlled by `importOrderTypeImports`. For instance, merging `import { useState } from 'react';` and `import { type FC, useEffect } from 'react';` produces:
+`esmExportSpecifierSort` sorts top-level `export { ... }` and `export type { ... }` entries by name. Aliased entries are sorted by their exported names.
 
-- `separate` (default): the merged statement is split back into two at the type-import stage, so you end up with an independent `import type` statement
-- `inline-first`: `import { type FC, useEffect, useState } from 'react';`
-- `inline-last`: `import { useEffect, useState, type FC } from 'react';`
-- `mixed`: `import { type FC, useEffect, useState } from 'react';`
-
-Set `importOrderMergeDuplicates` to `false` if you want to keep the original separate statements. Side-effect imports (`import 'mod';`) are never merged because their order has runtime semantics.
-
-#### Side-effect imports
-
-The order of side-effect imports (`import 'mod'`) often carries runtime meaning, such as CSS cascade order or polyfills that must load before a framework. The plugin never moves other imports across a side-effect import — imports on each side are sorted independently, and the side-effect import itself stays in place.
-
-Before:
-
-<!-- prettier-ignore -->
-```typescript
-import Button from './Button';
-import App from './App';
-import 'normalize.css';
-import theme from './theme';
-import Icon from './Icon';
-```
-
-After:
-
-```typescript
-import App from './App';
-import Button from './Button';
-
-import 'normalize.css';
-
-import Icon from './Icon';
-import theme from './theme';
-```
-
-Imports on each side are sorted independently. The side-effect import itself stays in place.
-
-Sorting rules:
-
-- Imports are classified into groups. Within each group they are sorted alphabetically
-- Default group order: `builtin` → `external` → `parent` → `sibling` → `index`
-- A blank line is inserted between groups by default. Disable with `importOrderSeparation`
-- `type` imports are split into their own statement by default. Use `importOrderTypeImports` to inline them instead
-- Multiple imports from the same source are merged into one by default. Disable with `importOrderMergeDuplicates`
-- Side-effect imports (`import 'mod'`) carry semantic order and are never moved. Imports on either side are sorted independently
-
-### Exports
-
-By default, named specifiers inside `export { … }` are sorted alphabetically.
-
-Before:
+Before sorting:
 
 <!-- prettier-ignore -->
 ```typescript
 export { useState, useEffect, type FC } from 'react';
 ```
 
-After:
+After sorting:
 
 ```typescript
 export { type FC, useEffect, useState } from 'react';
 ```
 
-The plugin only reorders what's inside the braces. It doesn't move the export statement itself and doesn't merge two same-source exports. Set `exportOrder` to `false` to disable this behavior.
+The plugin does not move or merge export declarations. If an export list contains comments, the declaration remains unchanged to preserve comment placement.
 
-Sorting rules:
+## `package.json` sorting
 
-- Named specifiers inside `export { … }` and `export type { … }` are sorted alphabetically
-- The position of the export statement in the file is not changed
-- Multiple export statements from the same source are not merged
+`package.json` field order follows [the default rules from sort-package-json 4.0.0](https://github.com/keithamus/sort-package-json/blob/v4.0.0/defaultRules.md). Nested content such as `scripts`, `exports`, and dependency fields follows the same version's rules.
 
-### package.json
-
-With the default config, the output looks like this.
-
-Before:
+Before sorting:
 
 <!-- prettier-ignore -->
 ```json
 {
   "version": "1.0.0",
-  "keywords": ["sort", "prettier", "plugin"],
-  "name": "demo",
+  "name": "example",
   "dependencies": {
-    "typescript": "^6.0.0",
-    "prettier": "^3.0.0"
+    "typescript": "^7.0.0",
+    "prettier": "^3.7.0"
   }
 }
 ```
 
-After:
+After sorting:
 
 ```json
 {
-  "name": "demo",
+  "name": "example",
   "version": "1.0.0",
-  "keywords": ["plugin", "prettier", "sort"],
   "dependencies": {
-    "prettier": "^3.0.0",
-    "typescript": "^6.0.0"
+    "prettier": "^3.7.0",
+    "typescript": "^7.0.0"
   }
 }
 ```
 
-Top-level key order follows the field list maintained by [sort-package-json](https://github.com/keithamus/sort-package-json), staying aligned with widely adopted community conventions.
+Setting `packageSort` to `false` disables key sorting only. Prettier still formats the file as usual.
 
-Rules the plugin follows:
+## TypeScript configuration
 
-- Top-level keys are reordered to the canonical sequence (`name` → `version` → ... → `dependencies`)
-- `scripts` and `betterScripts` keys are sorted with pre/post lifecycle grouping and `:` namespace ordering
-- `exports` keys are sorted: path subkeys first, conditions alphabetically with `default` moved to the end; nested export maps are recursively sorted
-- `dependencies`, `devDependencies`, `peerDependencies` and other dependency maps are always sorted alphabetically, even if `packageJsonOrder` is set to `false`, because `npm install` rewrites them in alphabetical order every time
-- String arrays are handled by field: `keywords`, `files`, `activationEvents` are deduplicated preserving original order; `bundledDependencies`, `bundleDependencies`, `extensionPack`, `extensionDependencies` are deduplicated then sorted; `workspaces` arrays are left untouched; all other string arrays are sorted alphabetically
-- Use `packageJsonOrderExcludeKeys` to opt specific top-level keys out of sorting entirely
-
-## Options
-
-Prettier plugin options are flat, so these options are prefixed with `importOrder`, `exportOrder`, or `packageJsonOrder`.
-
-| Option                        | Description                                                                                | Default                                                 |
-| ----------------------------- | ------------------------------------------------------------------------------------------ | ------------------------------------------------------- |
-| `importOrder`                 | Sort `import` declarations in JS / TS                                                      | `true`                                                  |
-| `importOrderGroups`           | Group order. Valid values: `builtin`, `external`, `internal`, `parent`, `sibling`, `index` | `["builtin", "external", "parent", "sibling", "index"]` |
-| `importOrderSeparation`       | Insert a blank line between adjacent groups                                                | `true`                                                  |
-| `importOrderTypeImports`      | How to place `type` imports: `separate`, `inline-first`, `inline-last`, `mixed`            | `"separate"`                                            |
-| `importOrderMergeDuplicates`  | Merge multiple `import` statements from the same source (except side-effect imports)       | `true`                                                  |
-| `exportOrder`                 | Sort named specifiers inside `export { … }` alphabetically                                 | `true`                                                  |
-| `packageJsonOrder`            | Sort top-level keys, scripts/exports subkeys, and string arrays in `package.json`            | `true`                                                  |
-| `packageJsonOrderExcludeKeys` | Top-level `package.json` keys to leave untouched                                           | `[]`                                                    |
-
-## Example
-
-```json
-{
-  "plugins": ["prettier-plugin-sort"],
-  "importOrderGroups": [
-    "builtin",
-    "external",
-    "internal",
-    "parent",
-    "sibling",
-    "index"
-  ],
-  "importOrderTypeImports": "inline-last",
-  "packageJsonOrderExcludeKeys": ["contributes"]
-}
-```
-
-## Type hints
-
-If you write your Prettier config in a `.ts` or `.js` file, you can reuse the `SortOptions` type exported by the plugin to get completion and validation.
-
-### In a `.ts` file
+The package also exports `SortOptions`, `ImportGroup`, and `TypeImportStyle` for use in TypeScript configuration files:
 
 ```typescript
 import { type Config } from 'prettier';
@@ -334,7 +212,7 @@ import { type SortOptions } from 'prettier-plugin-sort';
 
 export default {
   plugins: ['prettier-plugin-sort'],
-  importOrderGroups: [
+  esmImportGroups: [
     'builtin',
     'external',
     'internal',
@@ -342,46 +220,6 @@ export default {
     'sibling',
     'index',
   ],
-  importOrderTypeImports: 'inline-last',
-  packageJsonOrderExcludeKeys: ['contributes'],
+  esmImportTypeStyle: 'inline-last',
 } satisfies Config & SortOptions;
 ```
-
-### In a `.js` file
-
-```js
-/** @type {import('prettier').Config & import('prettier-plugin-sort').SortOptions} */
-const config = {
-  plugins: ['prettier-plugin-sort'],
-  importOrderGroups: [
-    'builtin',
-    'external',
-    'internal',
-    'parent',
-    'sibling',
-    'index',
-  ],
-  importOrderTypeImports: 'inline-last',
-  packageJsonOrderExcludeKeys: ['contributes'],
-};
-
-export default config;
-```
-
-The `ImportGroup` and `TypeImportsStyle` literal types are also exported if you only need those.
-
-## Motivation
-
-Before adopting Prettier, I relied on IDE-native sorting features to keep my code organized. As I started switching between different IDEs, I wanted a portable, unified configuration, so I brought ESLint and Prettier into my projects.
-
-Prettier doesn't provide sorting out of the box. To sort imports I had to install `prettier-plugin-organize-imports`. To sort `package.json` I had to install `prettier-plugin-packagejson`. The fragmented experience bothered me.
-
-I ignored this for a long time while focusing on actual development. Recently, though, I needed to control how `import type` was inlined and found that `prettier-plugin-organize-imports` didn't support it. On top of that, `prettier-plugin-packagejson`, built on `sort-package-json`, carries many dependencies that are redundant for a plugin. That's when I decided to build my own.
-
-`prettier-plugin-sort` isn't meant to replace anything. It's about giving developers more options. Prettier is used almost entirely for JS/TS code, and every JS project has a `package.json`, so the plugin covers these two fundamental sorting tasks. The goal is to let JS developers work out of the box with minimal mental overhead (support for `tsconfig.json` sorting may be added in a future release). If you have other sorting needs, you can still install something like `prettier-plugin-css-order` alongside it. There's no conflict.
-
-## Credits
-
-- `eslint-plugin-import`: https://github.com/import-js/eslint-plugin-import
-- `typescript-eslint`: https://github.com/typescript-eslint/typescript-eslint
-- `sort-package-json`: https://github.com/keithamus/sort-package-json

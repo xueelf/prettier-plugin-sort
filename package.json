@@ -1,7 +1,7 @@
 {
   "name": "prettier-plugin-sort",
   "version": "0.2.0",
-  "description": "An all-in-one Prettier plugin to sort imports, package.json keys, and more.",
+  "description": "A Prettier plugin for sorting ES module imports, export specifiers, and package.json keys.",
   "keywords": [
     "imports",
     "order",
