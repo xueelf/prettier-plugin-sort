@@ -1,51 +1,129 @@
-import { type ParserOptions } from 'prettier';
+import {
+  type ParserAstCommentWithTextRange,
+  type ParserAstNode,
+  findCommentIndexAtOrAfter,
+  getAstNodeName,
+  getAstNodeTextRange,
+  isPrettierIgnored,
+} from './parser-ast';
+import { type SourceTextEdit } from './utils/source-text';
 
-import { resolveSortOptions } from './options';
-import { splitTopLevel } from './utils';
-
-/**
- * 按字母序排列 `export { … }` 花括号内的命名导出。
- * 不改变语句位置，不跨语句合并，只针对单条 export 语句的花括号内部。
- *
- * 覆盖的语法形式：
- *   export { a, b };
- *   export { a, b } from 'mod';
- *   export type { A, B };
- *   export type { A, B } from 'mod';
- */
-export function sortExports(text: string, rawOptions: ParserOptions): string {
-  const options = resolveSortOptions(rawOptions);
-
-  if (!options.exportOrder) {
-    return text;
-  }
-  return text.replace(
-    /export(\s+type)?\s*\{([^}]*)\}/g,
-    (match, typeKeyword: string | undefined, inner: string) => {
-      const members = splitTopLevel(inner, ',');
-
-      if (members.length <= 1) {
-        return match;
-      }
-      const sorted = [...members].sort((a, b) =>
-        stripTypePrefix(a).localeCompare(stripTypePrefix(b), 'en', {
-          sensitivity: 'base',
-        }),
-      );
-      const unchanged = sorted.every(
-        (member, index) => member === members[index],
-      );
-
-      if (unchanged) {
-        return match;
-      }
-      const prefix = typeKeyword ? `export${typeKeyword}` : 'export';
-
-      return `${prefix} { ${sorted.join(', ')} }`;
-    },
-  );
+interface SortableExportSpecifier {
+  originalIndex: number;
+  sortName: string;
+  specifierText: string;
 }
 
-function stripTypePrefix(member: string): string {
-  return member.replace(/^type\s+/, '');
+/**
+ * 为无注释的 `export { ... }` 生成 specifier 排序编辑。
+ *
+ * 注释位于逗号两侧时，仅靠 parser 暴露的裸 AST 无法可靠判断它属于前一项还是后一项。
+ * 遇到这种声明时保持原样，避免为了排序改变注释语义。
+ */
+export function buildExportSortingEdits(
+  sourceText: string,
+  programStatements: readonly ParserAstNode[],
+  sortedComments: readonly ParserAstCommentWithTextRange[],
+): SourceTextEdit[] {
+  const sortingEdits: SourceTextEdit[] = [];
+
+  for (const exportDeclarationNode of programStatements) {
+    if (
+      exportDeclarationNode.type !== 'ExportNamedDeclaration' ||
+      exportDeclarationNode.declaration
+    ) {
+      continue;
+    }
+    const declarationRange = getAstNodeTextRange(exportDeclarationNode);
+    const specifierNodes = exportDeclarationNode.specifiers;
+
+    if (
+      !declarationRange ||
+      !specifierNodes ||
+      specifierNodes.length <= 1 ||
+      isPrettierIgnored(sourceText, declarationRange, sortedComments) ||
+      specifierNodes.some(
+        specifierNode => specifierNode.type !== 'ExportSpecifier',
+      )
+    ) {
+      continue;
+    }
+    const firstSpecifierRange = getAstNodeTextRange(specifierNodes[0]);
+    const lastSpecifierRange = getAstNodeTextRange(specifierNodes.at(-1));
+
+    if (!firstSpecifierRange || !lastSpecifierRange) {
+      continue;
+    }
+    const openingBraceIndex = sourceText.lastIndexOf(
+      '{',
+      firstSpecifierRange.start,
+    );
+    const closingBraceIndex = sourceText.indexOf('}', lastSpecifierRange.end);
+
+    if (
+      openingBraceIndex < declarationRange.start ||
+      closingBraceIndex < lastSpecifierRange.end ||
+      closingBraceIndex >= declarationRange.end
+    ) {
+      continue;
+    }
+    const firstInternalCommentIndex = findCommentIndexAtOrAfter(
+      sortedComments,
+      openingBraceIndex + 1,
+    );
+    const firstInternalComment = sortedComments[firstInternalCommentIndex];
+    const isInternalCommentPresent =
+      firstInternalComment !== undefined &&
+      firstInternalComment.textRange.start < closingBraceIndex;
+
+    if (isInternalCommentPresent) {
+      continue;
+    }
+    let isEverySpecifierValid = true;
+    const sortableSpecifiers: SortableExportSpecifier[] = [];
+
+    for (const [originalIndex, specifierNode] of specifierNodes.entries()) {
+      const specifierRange = getAstNodeTextRange(specifierNode);
+      const exportedName = getAstNodeName(specifierNode.exported);
+      const localName = getAstNodeName(specifierNode.local);
+      const sortName = exportedName ?? localName;
+
+      if (!specifierRange || !sortName) {
+        isEverySpecifierValid = false;
+        break;
+      }
+      sortableSpecifiers.push({
+        originalIndex,
+        sortName,
+        specifierText: sourceText.slice(
+          specifierRange.start,
+          specifierRange.end,
+        ),
+      });
+    }
+    if (!isEverySpecifierValid) {
+      continue;
+    }
+    const sortedSpecifiers = [...sortableSpecifiers].sort(
+      (left, right) =>
+        left.sortName.localeCompare(right.sortName, 'en', {
+          sensitivity: 'base',
+        }) || left.originalIndex - right.originalIndex,
+    );
+    const isSpecifierOrderUnchanged = sortedSpecifiers.every(
+      (specifier, sortedIndex) => specifier.originalIndex === sortedIndex,
+    );
+
+    if (isSpecifierOrderUnchanged) {
+      continue;
+    }
+    sortingEdits.push({
+      start: openingBraceIndex,
+      end: closingBraceIndex + 1,
+      replacementText: `{ ${sortedSpecifiers
+        .map(specifier => specifier.specifierText)
+        .join(', ')} }`,
+    });
+  }
+  return sortingEdits;
 }

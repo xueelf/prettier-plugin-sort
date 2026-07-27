@@ -1,564 +1,1389 @@
-import { builtinModules } from 'node:module';
-
-import { type ParserOptions } from 'prettier';
-
 import {
   type ImportGroup,
   type SortOptions,
-  type TypeImportsStyle,
-  resolveSortOptions,
+  type TypeImportStyle,
 } from './options';
-import { splitTopLevel } from './utils';
+import {
+  type ParserAstComment,
+  type ParserAstCommentWithTextRange,
+  type ParserAstNode,
+  findCommentIndexAtOrAfter,
+  getAstCommentText,
+  getAstNodeName,
+  getAstNodeTextRange,
+  isPrettierIgnored,
+  isSourceRangeWhitespaceOrComments,
+} from './parser-ast';
+import {
+  type SourceTextEdit,
+  type SourceTextRange,
+  applySourceTextEdits,
+} from './utils/source-text';
 
-const NODE_BUILTINS = new Set<string>(builtinModules);
-const INDEX_PATTERN = /^\.\/index(\.[a-z]+)?$/;
+const INDEX_MODULE_PATTERN = /^\.\/index(?:\.[^/]+)*$/;
+const PRETTIER_FILE_PRAGMA_DIRECTIVES = ['@format', '@prettier'] as const;
+const ESLINT_RANGE_DIRECTIVES = ['eslint-disable', 'eslint-enable'] as const;
+const ESLINT_GLOBAL_DIRECTIVES = ['global', 'globals'] as const;
 
-/** 根据导入来源归类为不同分组。分类规则遵循 eslint-plugin-import 的 import/order 算法。 */
-function detectGroup(source: string): ImportGroup {
-  // 1. 带运行时前缀的内置模块，以及无前缀的内核模块。
+/** 只匹配完整指令名，避免把普通说明文字误判为格式化指令。 */
+function getCommentDirectiveArguments(
+  commentLine: string,
+  directive: string,
+): string | null {
+  if (!commentLine.startsWith(directive)) {
+    return null;
+  }
+  const directiveArguments = commentLine.slice(directive.length);
+
+  if (directiveArguments === '') {
+    return '';
+  }
+  if (directiveArguments[0]?.trim() !== '') {
+    return null;
+  }
+  return directiveArguments.trimStart();
+}
+
+function hasCommentDirective(
+  commentLine: string,
+  directives: readonly string[],
+): boolean {
+  return directives.some(
+    directive => getCommentDirectiveArguments(commentLine, directive) !== null,
+  );
+}
+
+function isEslintRuleConfiguration(commentLine: string): boolean {
+  const ruleConfiguration = getCommentDirectiveArguments(commentLine, 'eslint');
+
+  if (!ruleConfiguration) {
+    return false;
+  }
+  const separatorIndex = ruleConfiguration.indexOf(':');
+
+  if (separatorIndex < 1) {
+    return false;
+  }
+  const ruleName = ruleConfiguration.slice(0, separatorIndex).trimEnd();
+
+  return (
+    ruleName.length > 0 &&
+    [...ruleName].every(character => character.trim() !== '')
+  );
+}
+
+function isFixedEslintComment(
+  comment: ParserAstComment,
+  isBlockComment: boolean,
+): boolean {
+  if (!isBlockComment) {
+    return false;
+  }
+  const commentText = getAstCommentText(comment)?.trim();
+
+  if (!commentText) {
+    return false;
+  }
+  return (
+    hasCommentDirective(commentText, ESLINT_RANGE_DIRECTIVES) ||
+    isEslintRuleConfiguration(commentText) ||
+    hasCommentDirective(commentText, ESLINT_GLOBAL_DIRECTIVES)
+  );
+}
+
+function isEslintNextLineComment(comment: ParserAstComment): boolean {
+  const commentText = getAstCommentText(comment)?.trim();
+
+  if (!commentText) {
+    return false;
+  }
+  return (
+    getCommentDirectiveArguments(commentText, 'eslint-disable-next-line') !==
+    null
+  );
+}
+
+function isFixedEslintParserComment(
+  sourceText: string,
+  parserComment: ParserAstCommentWithTextRange,
+): boolean {
+  const { comment, textRange } = parserComment;
+  const sourceCommentText = sourceText.slice(textRange.start, textRange.end);
+
+  return isFixedEslintComment(comment, sourceCommentText.startsWith('/*'));
+}
+
+function isPositionSensitiveEslintComment(
+  sourceText: string,
+  parserComment: ParserAstCommentWithTextRange,
+): boolean {
+  return (
+    isEslintNextLineComment(parserComment.comment) ||
+    isFixedEslintParserComment(sourceText, parserComment)
+  );
+}
+
+function getCommentLines(comment: ParserAstComment): string[] {
+  const commentText = getAstCommentText(comment);
+
+  if (commentText === null) {
+    return [];
+  }
+  return commentText
+    .split(/\r?\n/)
+    .map(commentLine => commentLine.replace(/^\s*\*+\s*/, ''));
+}
+
+function isFixedFileComment(
+  sourceText: string,
+  comment: ParserAstComment,
+  commentRange: { start: number; end: number },
+  prettierFilePragmaComment: ParserAstComment | null,
+): boolean {
+  const sourceCommentText = sourceText.slice(
+    commentRange.start,
+    commentRange.end,
+  );
+
+  if (sourceCommentText.startsWith('#!')) {
+    return true;
+  }
+  if (comment === prettierFilePragmaComment) {
+    return true;
+  }
+  const isBlockComment = sourceCommentText.startsWith('/*');
+
+  return isFixedEslintComment(comment, isBlockComment);
+}
+
+function getPrettierFilePragmaComment(
+  sortedComments: readonly ParserAstCommentWithTextRange[],
+  isPrettierFilePragmaPresent: boolean,
+): ParserAstComment | null {
+  if (!isPrettierFilePragmaPresent) {
+    return null;
+  }
+  return (
+    sortedComments.find(({ comment }) =>
+      getCommentLines(comment).some(commentLine =>
+        hasCommentDirective(
+          commentLine.trim(),
+          PRETTIER_FILE_PRAGMA_DIRECTIVES,
+        ),
+      ),
+    )?.comment ?? null
+  );
+}
+
+function classifyImportGroup(moduleSpecifier: string): ImportGroup {
   if (
-    source === 'bun' ||
-    source.startsWith('bun:') ||
-    source.startsWith('node:')
+    moduleSpecifier === 'bun' ||
+    moduleSpecifier.startsWith('bun:') ||
+    moduleSpecifier.startsWith('node:')
   ) {
     return 'builtin';
   }
-  const slashIndex = source.indexOf('/');
-  const head = slashIndex === -1 ? source : source.slice(0, slashIndex);
-
-  if (head && NODE_BUILTINS.has(head)) {
-    return 'builtin';
-  }
-
-  // 2. 当前目录的 index 模块。
-  if (source === '.' || source === './' || INDEX_PATTERN.test(source)) {
+  if (
+    moduleSpecifier === '.' ||
+    moduleSpecifier === './' ||
+    INDEX_MODULE_PATTERN.test(moduleSpecifier)
+  ) {
     return 'index';
   }
-
-  // 3. 向上跳级的相对路径。
-  if (source.startsWith('../') || source === '..') {
+  if (moduleSpecifier === '..' || moduleSpecifier.startsWith('../')) {
     return 'parent';
   }
-
-  // 4. 同级相对路径。
-  if (source.startsWith('./')) {
+  if (moduleSpecifier.startsWith('./')) {
     return 'sibling';
   }
-
-  // 5. 绝对路径和路径别名。
   if (
-    source.startsWith('/') ||
-    source.startsWith('~') ||
-    source.startsWith('@/')
+    moduleSpecifier.startsWith('/') ||
+    moduleSpecifier.startsWith('~') ||
+    moduleSpecifier.startsWith('@/') ||
+    moduleSpecifier.startsWith('#')
   ) {
     return 'internal';
   }
-  // 6. 剩余的均为 npm 包。
   return 'external';
 }
 
-interface Member {
-  /** 本地绑定名称，如 `foo` 或 `foo as Foo`。 */
-  name: string;
-  isType: boolean;
-}
+/**
+ * 收集随 import 一起移动的前置注释。
+ * 文件级指令、同行代码和空行都会停止向前扩展。
+ */
+function findLeadingCommentsStart(
+  sourceText: string,
+  statementStart: number,
+  sortedComments: readonly ParserAstCommentWithTextRange[],
+  prettierFilePragmaComment: ParserAstComment | null,
+): number {
+  let attachedTextStart = statementStart;
 
-interface ParsedImport {
-  source: string;
-  /** 整条语句是 `import type { … }`。 */
-  typeClause: boolean;
-  /** `import 'mod'` 无任何导出符。 */
-  sideEffect: boolean;
-  defaultSpec: string | null;
-  /** 命名空间导入，如 `* as ns`。 */
-  namespaceSpec: string | null;
-  /** `null` 表示没有命名导入块。 */
-  members: Member[] | null;
-  /** ES2023 import attributes，如 `with { type: 'json' }`。`null` 表示无。 */
-  attributes: string | null;
-  /** 紧邻 import 语句上方的注释，包含末尾换行符。 */
-  leadingComments: string;
-}
+  for (
+    let commentIndex =
+      findCommentIndexAtOrAfter(sortedComments, statementStart) - 1;
+    commentIndex >= 0;
+    commentIndex--
+  ) {
+    const parserComment = sortedComments[commentIndex];
 
-const TYPE_PREFIX = /^type\s+(.+)$/;
-
-function splitMembers(inner: string): Member[] {
-  return splitTopLevel(inner, ',').map<Member>(part => {
-    const match = TYPE_PREFIX.exec(part);
-
-    return match
-      ? { name: match[1]!.trim(), isType: true }
-      : { name: part, isType: false };
-  });
-}
-
-interface RawStatement {
-  raw: string;
-  leadingComments: string;
-}
-
-function parseImport(statement: RawStatement): ParsedImport | null {
-  const trimmed = statement.raw.trim();
-  const leadingComments = statement.leadingComments;
-  const sideEffect =
-    /^import\s*(['"])([^'"]+)\1(?:\s+with\s*(\{[^}]*\}))?\s*;?$/.exec(trimmed);
-
-  if (sideEffect) {
-    return {
-      source: sideEffect[2] ?? '',
-      typeClause: false,
-      sideEffect: true,
-      defaultSpec: null,
-      namespaceSpec: null,
-      members: null,
-      attributes: sideEffect[3] ?? null,
-      leadingComments,
-    };
-  }
-  const match =
-    /^import\s+(type\s+)?([\s\S]+?)\s*from\s*(['"])([^'"]+)\3(?:\s+with\s*(\{[^}]*\}))?\s*;?$/.exec(
-      trimmed,
-    );
-
-  if (!match) {
-    return null;
-  }
-  const typeClause = Boolean(match[1]);
-  const clause = (match[2] ?? '').trim();
-  const source = match[4] ?? '';
-  const attributes = match[5] ?? null;
-
-  let defaultSpec: string | null = null;
-  let namespaceSpec: string | null = null;
-  let members: Member[] | null = null;
-
-  for (const part of splitTopLevel(clause, ',')) {
-    if (part.startsWith('{')) {
-      const inner = part.slice(1, part.lastIndexOf('}')).trim();
-      members = inner ? splitMembers(inner) : [];
-    } else if (part.startsWith('*')) {
-      namespaceSpec = part;
-    } else {
-      defaultSpec = part;
+    if (!parserComment || parserComment.textRange.end > statementStart) {
+      continue;
     }
-  }
+    const { comment, textRange } = parserComment;
 
-  return {
-    source,
-    typeClause,
-    sideEffect: false,
-    defaultSpec,
-    namespaceSpec,
-    members,
-    attributes,
-    leadingComments,
-  };
+    if (
+      isFixedFileComment(
+        sourceText,
+        comment,
+        textRange,
+        prettierFilePragmaComment,
+      )
+    ) {
+      break;
+    }
+    const textBetweenCommentAndImport = sourceText.slice(
+      textRange.end,
+      attachedTextStart,
+    );
+    const lineBreakCount =
+      textBetweenCommentAndImport.match(/\n/g)?.length ?? 0;
+    const isEslintNextLineCommentAttached =
+      attachedTextStart === statementStart &&
+      isEslintNextLineComment(comment) &&
+      textBetweenCommentAndImport.trim() === '' &&
+      lineBreakCount === 1;
+
+    if (isEslintNextLineCommentAttached) {
+      attachedTextStart = textRange.start;
+      continue;
+    }
+    const commentLineStart =
+      sourceText.lastIndexOf('\n', textRange.start - 1) + 1;
+
+    if (sourceText.slice(commentLineStart, textRange.start).trim() !== '') {
+      break;
+    }
+    if (textBetweenCommentAndImport.trim() !== '' || lineBreakCount >= 2) {
+      break;
+    }
+    attachedTextStart = textRange.start;
+  }
+  while (
+    attachedTextStart > 0 &&
+    /[ \t]/.test(sourceText[attachedTextStart - 1]!)
+  ) {
+    attachedTextStart--;
+  }
+  return attachedTextStart;
 }
 
-interface ImportBlock {
-  start: number;
-  end: number;
-  statements: RawStatement[];
+function getRangeEndIncludingLineBreak(
+  sourceText: string,
+  sourceIndex: number,
+): number {
+  if (
+    sourceText[sourceIndex] === '\r' &&
+    sourceText[sourceIndex + 1] === '\n'
+  ) {
+    return sourceIndex + 2;
+  }
+  if (sourceText[sourceIndex] === '\n') {
+    return sourceIndex + 1;
+  }
+  return sourceIndex;
 }
 
 /**
- * 提取源文本顶部连续的 import 声明块。不依赖 AST 解析。
- *
- * 使用带 `y` 标志的 sticky 正则从游标处逐段推进，避免每轮循环对剩余文本 `slice`。
- * 将 O(N²) 的字符串复制降为 O(N)。
+ * 收集 import 同一行末尾的普通注释。
+ * 位置敏感的 ESLint 指令留在原位，并作为当前排序片段的边界。
  */
-function extractImportBlock(text: string): ImportBlock | null {
-  // `import\b(?![.(])` 排除 `import.meta` 与动态 `import('mod')`，避免被当作导入语句误解析。
-  const firstRe =
-    /(?:^|\n)(?:[ \t]*(?:\/\/[^\n]*|\/\*[\s\S]*?\*\/)[ \t]*\n)*[ \t]*import\b(?![.(])/;
-  const first = firstRe.exec(text);
+function getTrailingComments(
+  sourceText: string,
+  statementEnd: number,
+  sortedComments: readonly ParserAstCommentWithTextRange[],
+): {
+  commentsText: string;
+  rangeEnd: number;
+  isImportSortingBoundary: boolean;
+} {
+  let trailingCommentsEnd = statementEnd;
+  let isImportSortingBoundary = false;
 
-  if (!first) {
-    return null;
-  }
-  const start = first.index + (text[first.index] === '\n' ? 1 : 0);
-  const statements: RawStatement[] = [];
+  const firstTrailingCommentIndex = findCommentIndexAtOrAfter(
+    sortedComments,
+    statementEnd,
+  );
 
-  // 跳过空行以及独立的注释行
-  // 紧邻下一个 import 上方、第一个空行以内的注释会被捕获并重新附加，避免排序后丢失。
-  const skipRe = /(?:[ \t]*(?:\/\/[^\n]*|\/\*[\s\S]*?\*\/)?[ \t]*\n)*/y;
-  const importRe =
-    /[ \t]*(import\b(?![.(])[\s\S]*?(?:from\s*(['"])[^'"]+\2|(['"])[^'"]+\3)(?:\s+with\s*\{[^}]*\})?\s*;?)/y;
+  for (
+    let commentIndex = firstTrailingCommentIndex;
+    commentIndex < sortedComments.length;
+    commentIndex++
+  ) {
+    const trailingComment = sortedComments[commentIndex];
 
-  let cursor = start;
-
-  while (cursor < text.length) {
-    skipRe.lastIndex = cursor;
-    const skipMatch = skipRe.exec(text);
-    const skipped = skipMatch ? skipMatch[0] : '';
-    const afterSkip = cursor + skipped.length;
-
-    importRe.lastIndex = afterSkip;
-    const importMatch = importRe.exec(text);
-
-    if (!importMatch) {
+    if (!trailingComment) {
       break;
     }
-    const normalised = skipped.endsWith('\n') ? skipped.slice(0, -1) : skipped;
-    const commentLines = normalised.length > 0 ? normalised.split('\n') : [];
-    const leadingLines: string[] = [];
+    const { textRange } = trailingComment;
+    const textBeforeComment = sourceText.slice(
+      trailingCommentsEnd,
+      textRange.start,
+    );
 
-    for (let i = commentLines.length - 1; i >= 0; i--) {
-      const line = commentLines[i]!;
-
-      if (line.trim() === '') {
-        break;
-      }
-      leadingLines.unshift(line);
-    }
-    const leadingComments =
-      leadingLines.length > 0 ? leadingLines.join('\n') + '\n' : '';
-
-    const statement = importMatch[1];
-
-    if (!statement) {
+    if (textBeforeComment.includes('\n') || textBeforeComment.trim() !== '') {
       break;
     }
-    statements.push({ raw: statement.trim(), leadingComments });
-    cursor = afterSkip + importMatch[0].length;
-  }
+    const commentLineEnd = sourceText.indexOf('\n', textRange.end);
 
-  if (statements.length === 0) {
-    return null;
+    if (
+      !isSourceRangeWhitespaceOrComments(
+        sourceText,
+        {
+          start: textRange.end,
+          end: commentLineEnd < 0 ? sourceText.length : commentLineEnd,
+        },
+        sortedComments,
+      )
+    ) {
+      break;
+    }
+    if (isFixedEslintParserComment(sourceText, trailingComment)) {
+      isImportSortingBoundary = true;
+      break;
+    }
+    if (isEslintNextLineComment(trailingComment.comment)) {
+      break;
+    }
+    trailingCommentsEnd = textRange.end;
   }
-  return { start, end: cursor, statements };
+  return {
+    commentsText: sourceText.slice(statementEnd, trailingCommentsEnd),
+    rangeEnd: trailingCommentsEnd,
+    isImportSortingBoundary,
+  };
 }
 
-function renderMembers(members: Member[]): string {
-  return members
-    .map(member => (member.isType ? `type ${member.name}` : member.name))
+function parseImportAttributes(
+  sourceText: string,
+  importDeclarationNode: ParserAstNode,
+): { attributesText: string | null; isValid: boolean } {
+  const declarationRange = getAstNodeTextRange(importDeclarationNode);
+  const moduleSpecifierRange = getAstNodeTextRange(
+    importDeclarationNode.source,
+  );
+
+  if (!declarationRange || !moduleSpecifierRange) {
+    return { attributesText: null, isValid: false };
+  }
+  const importAttributesText = sourceText
+    .slice(moduleSpecifierRange.end, declarationRange.end)
+    .replace(/;\s*$/, '')
+    .trim();
+
+  if (importAttributesText === '') {
+    return { attributesText: null, isValid: true };
+  }
+  return {
+    attributesText: importAttributesText,
+    isValid: /^(?:with|assert)\s*\{[\s\S]*\}$/.test(importAttributesText),
+  };
+}
+
+interface ParsedImportSpecifier {
+  importedName: string;
+  importedNameText: string;
+  localName: string;
+  isTypeOnly: boolean;
+}
+
+interface ParsedImportDeclaration {
+  moduleSpecifier: string;
+  moduleSpecifierText: string;
+  isTypeOnly: boolean;
+  isSideEffectOnly: boolean;
+  defaultBinding: string | null;
+  namespaceBinding: string | null;
+  namedSpecifiers: ParsedImportSpecifier[] | null;
+  importAttributes: string | null;
+  verbatimDeclaration: string | null;
+  leadingCommentsText: string;
+  trailingCommentsText: string;
+  isMergeBoundary: boolean;
+}
+
+interface ImportDeclarationMetadata {
+  importDeclarationNode: ParserAstNode;
+  declarationRange: SourceTextRange;
+  leadingCommentsText: string;
+  trailingCommentsText: string;
+  hasInternalComments: boolean;
+}
+
+/**
+ * 从 AST 提取可安全重写的 import 字段。
+ * 无法完整识别的语法保留原声明，只参与分组和位置排序。
+ */
+function parseImportDeclaration(
+  importDeclarationMetadata: ImportDeclarationMetadata,
+  sourceText: string,
+): ParsedImportDeclaration | null {
+  const {
+    importDeclarationNode,
+    declarationRange,
+    leadingCommentsText,
+    trailingCommentsText,
+    hasInternalComments,
+  } = importDeclarationMetadata;
+  const moduleSpecifierNode = importDeclarationNode.source;
+  const moduleSpecifierRange = getAstNodeTextRange(moduleSpecifierNode);
+  const moduleSpecifier = getAstNodeName(moduleSpecifierNode);
+
+  if (!moduleSpecifierRange || moduleSpecifier === null) {
+    return null;
+  }
+  let importKind = 'value';
+
+  const declarationText = sourceText.slice(
+    declarationRange.start,
+    declarationRange.end,
+  );
+
+  if (typeof importDeclarationNode.importKind === 'string') {
+    importKind = importDeclarationNode.importKind;
+  }
+  let specifierNodes: readonly ParserAstNode[] = [];
+  const isTypeOnly = importKind === 'type';
+
+  if (Array.isArray(importDeclarationNode.specifiers)) {
+    specifierNodes = importDeclarationNode.specifiers;
+  }
+  let importPhase: string | null = null;
+
+  const isSideEffectOnly =
+    specifierNodes.length === 0 && importKind === 'value';
+  const parsedImportAttributes = parseImportAttributes(
+    sourceText,
+    importDeclarationNode,
+  );
+
+  if (typeof importDeclarationNode.phase === 'string') {
+    importPhase = importDeclarationNode.phase;
+  }
+  let defaultBinding: string | null = null;
+  let namespaceBinding: string | null = null;
+  let isEverySpecifierSupported = true;
+
+  const namedSpecifiers: ParsedImportSpecifier[] = [];
+
+  for (const specifierNode of specifierNodes) {
+    if (specifierNode.type === 'ImportDefaultSpecifier') {
+      defaultBinding = getAstNodeName(specifierNode.local);
+      isEverySpecifierSupported &&= defaultBinding !== null;
+      continue;
+    }
+    if (specifierNode.type === 'ImportNamespaceSpecifier') {
+      namespaceBinding = getAstNodeName(specifierNode.local);
+      isEverySpecifierSupported &&= namespaceBinding !== null;
+      continue;
+    }
+    if (specifierNode.type !== 'ImportSpecifier') {
+      isEverySpecifierSupported = false;
+      continue;
+    }
+    let specifierKind = 'value';
+
+    const importedNode = specifierNode.imported;
+    const importedNameRange = getAstNodeTextRange(importedNode);
+    const importedName = getAstNodeName(importedNode);
+    const localName = getAstNodeName(specifierNode.local);
+
+    if (typeof specifierNode.importKind === 'string') {
+      specifierKind = specifierNode.importKind;
+    }
+    if (
+      !importedNameRange ||
+      importedName === null ||
+      localName === null ||
+      (specifierKind !== 'value' && specifierKind !== 'type')
+    ) {
+      isEverySpecifierSupported = false;
+      continue;
+    }
+    namedSpecifiers.push({
+      importedName,
+      importedNameText: sourceText.slice(
+        importedNameRange.start,
+        importedNameRange.end,
+      ),
+      localName,
+      isTypeOnly: specifierKind === 'type',
+    });
+  }
+  let parsedNamedSpecifiers: ParsedImportSpecifier[] | null = null;
+
+  const isTypeClauseRewriteUnsupported =
+    isTypeOnly && (defaultBinding !== null || namespaceBinding !== null);
+  const isVerbatimRenderingRequired =
+    specifierNodes.length === 0 ||
+    hasInternalComments ||
+    importPhase !== null ||
+    (importKind !== 'value' && importKind !== 'type') ||
+    !isEverySpecifierSupported ||
+    !parsedImportAttributes.isValid ||
+    isTypeClauseRewriteUnsupported ||
+    (isTypeOnly && parsedImportAttributes.attributesText !== null);
+
+  if (namedSpecifiers.length > 0) {
+    parsedNamedSpecifiers = namedSpecifiers;
+  }
+  let verbatimDeclaration: string | null = null;
+
+  if (isVerbatimRenderingRequired) {
+    verbatimDeclaration = declarationText;
+  }
+  return {
+    moduleSpecifier,
+    moduleSpecifierText: sourceText.slice(
+      moduleSpecifierRange.start,
+      moduleSpecifierRange.end,
+    ),
+    isTypeOnly,
+    isSideEffectOnly,
+    defaultBinding,
+    namespaceBinding,
+    namedSpecifiers: parsedNamedSpecifiers,
+    importAttributes: parsedImportAttributes.attributesText,
+    verbatimDeclaration,
+    leadingCommentsText,
+    trailingCommentsText,
+    isMergeBoundary:
+      leadingCommentsText.trim() !== '' ||
+      trailingCommentsText !== '' ||
+      hasInternalComments,
+  };
+}
+
+function renderNamedImportSpecifiers(
+  namedSpecifiers: readonly ParsedImportSpecifier[],
+): string {
+  return namedSpecifiers
+    .map(importSpecifier => {
+      let renderedSpecifier = importSpecifier.importedNameText;
+
+      const isAliasRequired =
+        importSpecifier.importedNameText !== importSpecifier.importedName ||
+        importSpecifier.importedName !== importSpecifier.localName;
+
+      if (isAliasRequired) {
+        renderedSpecifier = `${importSpecifier.importedNameText} as ${importSpecifier.localName}`;
+      }
+      if (importSpecifier.isTypeOnly) {
+        return `type ${renderedSpecifier}`;
+      }
+      return renderedSpecifier;
+    })
     .join(', ');
 }
 
-/** 拼接 `default, * as ns, { members }` 格式的 specifier 列表。 */
-function renderSpecifiers(importDecl: ParsedImport): string {
-  const parts: string[] = [];
+function renderImportBindings(
+  importDeclaration: ParsedImportDeclaration,
+): string {
+  const renderedBindings: string[] = [];
 
-  if (importDecl.defaultSpec) {
-    parts.push(importDecl.defaultSpec);
+  if (importDeclaration.defaultBinding) {
+    renderedBindings.push(importDeclaration.defaultBinding);
   }
-  if (importDecl.namespaceSpec) {
-    parts.push(importDecl.namespaceSpec);
+  if (importDeclaration.namespaceBinding) {
+    renderedBindings.push(`* as ${importDeclaration.namespaceBinding}`);
   }
-  if (importDecl.members) {
-    parts.push(`{ ${renderMembers(importDecl.members)} }`);
+  if (importDeclaration.namedSpecifiers) {
+    renderedBindings.push(
+      `{ ${renderNamedImportSpecifiers(importDeclaration.namedSpecifiers)} }`,
+    );
   }
-  return parts.join(', ');
+  return renderedBindings.join(', ');
 }
 
-function renderImport(importDecl: ParsedImport): string {
-  const suffix = importDecl.attributes ? ` with ${importDecl.attributes}` : '';
-  const source = `'${importDecl.source}'`;
-  const body = importDecl.sideEffect
-    ? `import ${source}${suffix};`
-    : importDecl.typeClause
-      ? `import type ${renderSpecifiers(importDecl)} from ${source}${suffix};`
-      : `import ${renderSpecifiers(importDecl)} from ${source}${suffix};`;
+function renderImportDeclaration(
+  importDeclaration: ParsedImportDeclaration,
+): string {
+  if (importDeclaration.verbatimDeclaration !== null) {
+    return (
+      importDeclaration.leadingCommentsText +
+      importDeclaration.verbatimDeclaration +
+      importDeclaration.trailingCommentsText
+    );
+  }
+  let attributesSuffix = '';
 
-  return importDecl.leadingComments + body;
-}
+  if (importDeclaration.importAttributes) {
+    attributesSuffix = ` ${importDeclaration.importAttributes}`;
+  }
+  let declarationText = `import ${renderImportBindings(importDeclaration)} from ${importDeclaration.moduleSpecifierText}${attributesSuffix};`;
 
-function sortMembersAlpha<T extends Member>(members: T[]): T[] {
-  return [...members].sort((a, b) =>
-    a.name.localeCompare(b.name, 'en', { sensitivity: 'base' }),
+  if (importDeclaration.isTypeOnly) {
+    declarationText = `import type ${renderImportBindings(importDeclaration)} from ${importDeclaration.moduleSpecifierText}${attributesSuffix};`;
+  }
+  return (
+    importDeclaration.leadingCommentsText +
+    declarationText +
+    importDeclaration.trailingCommentsText
   );
 }
 
-/**
- * 将 `import type { … }` 改写为 `import { type … }`，让后续合并与 applyTypeImports 只需处理一种形式。
- * `import type Foo` 与 `import type * as ns` 无法在花括号内表达 type 修饰，保持原样。
- */
-function normalizeTypeClause(importDecl: ParsedImport): ParsedImport {
-  if (!importDecl.typeClause || importDecl.members === null) {
-    return importDecl;
+function sortNamedImportSpecifiers(
+  namedSpecifiers: readonly ParsedImportSpecifier[],
+): ParsedImportSpecifier[] {
+  return [...namedSpecifiers].sort((left, right) =>
+    left.localName.localeCompare(right.localName, 'en', {
+      sensitivity: 'base',
+    }),
+  );
+}
+
+function getLocalBindingNames(
+  importDeclaration: ParsedImportDeclaration,
+): string[] {
+  const localBindingNames: string[] = [];
+
+  if (importDeclaration.defaultBinding) {
+    localBindingNames.push(importDeclaration.defaultBinding);
+  }
+  if (importDeclaration.namespaceBinding) {
+    localBindingNames.push(importDeclaration.namespaceBinding);
+  }
+  if (importDeclaration.namedSpecifiers) {
+    localBindingNames.push(
+      ...importDeclaration.namedSpecifiers.map(
+        importSpecifier => importSpecifier.localName,
+      ),
+    );
+  }
+  return localBindingNames;
+}
+
+function normalizeNamedTypeOnlyImport(
+  importDeclaration: ParsedImportDeclaration,
+): ParsedImportDeclaration {
+  if (
+    !importDeclaration.isTypeOnly ||
+    !importDeclaration.namedSpecifiers ||
+    importDeclaration.defaultBinding ||
+    importDeclaration.namespaceBinding ||
+    importDeclaration.verbatimDeclaration !== null
+  ) {
+    return importDeclaration;
   }
   return {
-    ...importDecl,
-    typeClause: false,
-    members: importDecl.members.map(member => ({ ...member, isType: true })),
+    ...importDeclaration,
+    isTypeOnly: false,
+    namedSpecifiers: importDeclaration.namedSpecifiers.map(importSpecifier => ({
+      ...importSpecifier,
+      isTypeOnly: true,
+    })),
+  };
+}
+
+interface ImportBindingCounts {
+  defaultBindingCount: number;
+  namespaceBindingCount: number;
+}
+
+function getImportRequestKey(
+  importDeclaration: ParsedImportDeclaration,
+): string {
+  return `${importDeclaration.moduleSpecifier}\0${importDeclaration.importAttributes ?? ''}`;
+}
+
+function isImportDeclarationMergeSafe(
+  targetImportDeclaration: ParsedImportDeclaration,
+  candidateImportDeclaration: ParsedImportDeclaration,
+  bindingCounts: ImportBindingCounts,
+): boolean {
+  if (
+    targetImportDeclaration.verbatimDeclaration !== null ||
+    candidateImportDeclaration.verbatimDeclaration !== null ||
+    targetImportDeclaration.isSideEffectOnly ||
+    candidateImportDeclaration.isSideEffectOnly ||
+    targetImportDeclaration.moduleSpecifier !==
+      candidateImportDeclaration.moduleSpecifier ||
+    targetImportDeclaration.importAttributes !==
+      candidateImportDeclaration.importAttributes ||
+    targetImportDeclaration.isMergeBoundary ||
+    candidateImportDeclaration.isMergeBoundary
+  ) {
+    return false;
+  }
+  if (
+    (bindingCounts.defaultBindingCount > 1 &&
+      (targetImportDeclaration.defaultBinding !== null ||
+        candidateImportDeclaration.defaultBinding !== null)) ||
+    (bindingCounts.namespaceBindingCount > 1 &&
+      (targetImportDeclaration.namespaceBinding !== null ||
+        candidateImportDeclaration.namespaceBinding !== null)) ||
+    (targetImportDeclaration.defaultBinding !== null &&
+      candidateImportDeclaration.defaultBinding !== null) ||
+    (targetImportDeclaration.namespaceBinding !== null &&
+      candidateImportDeclaration.namespaceBinding !== null)
+  ) {
+    return false;
+  }
+  const isAnyNamedSpecifierPresent =
+    (targetImportDeclaration.namedSpecifiers?.length ?? 0) > 0 ||
+    (candidateImportDeclaration.namedSpecifiers?.length ?? 0) > 0;
+
+  if (
+    isAnyNamedSpecifierPresent &&
+    (targetImportDeclaration.namespaceBinding !== null ||
+      candidateImportDeclaration.namespaceBinding !== null)
+  ) {
+    return false;
+  }
+  const usedLocalNames = new Set(getLocalBindingNames(targetImportDeclaration));
+
+  return getLocalBindingNames(candidateImportDeclaration).every(
+    localName => !usedLocalNames.has(localName),
+  );
+}
+
+function mergeImportDeclarations(
+  targetImportDeclaration: ParsedImportDeclaration,
+  candidateImportDeclaration: ParsedImportDeclaration,
+): ParsedImportDeclaration {
+  let namedSpecifiers: ParsedImportSpecifier[] | null = null;
+
+  const mergedNamedSpecifiers = [
+    ...(targetImportDeclaration.namedSpecifiers ?? []),
+    ...(candidateImportDeclaration.namedSpecifiers ?? []),
+  ];
+
+  if (mergedNamedSpecifiers.length > 0) {
+    namedSpecifiers = mergedNamedSpecifiers;
+  }
+  return {
+    moduleSpecifier: targetImportDeclaration.moduleSpecifier,
+    moduleSpecifierText: targetImportDeclaration.moduleSpecifierText,
+    isTypeOnly: false,
+    isSideEffectOnly: false,
+    defaultBinding:
+      targetImportDeclaration.defaultBinding ??
+      candidateImportDeclaration.defaultBinding,
+    namespaceBinding:
+      targetImportDeclaration.namespaceBinding ??
+      candidateImportDeclaration.namespaceBinding,
+    namedSpecifiers,
+    importAttributes: targetImportDeclaration.importAttributes,
+    verbatimDeclaration: null,
+    leadingCommentsText: targetImportDeclaration.leadingCommentsText,
+    trailingCommentsText: '',
+    isMergeBoundary: false,
   };
 }
 
 /**
- * 将来源相同的多条 import 合并为一条。不合并 side-effect import 和 import type default/namespace 导入。
- * 合并键包含 attributes，`with { type: 'json' }` 与不带 attributes 语义不同，强行合并会导致语句丢失。
- * 合并后再交给 applyTypeImports，separate 模式下依然会把 type 和值拆回两条。
+ * 只合并语义兼容的同源 import。
+ * 注释、属性、重复绑定和 namespace 组合都会阻止合并。
  */
-function mergeImportsFromSameSource(imports: ParsedImport[]): ParsedImport[] {
-  const indexByKey = new Map<string, number>();
-  const result: ParsedImport[] = [];
+function mergeCompatibleImports(
+  importDeclarations: readonly ParsedImportDeclaration[],
+): ParsedImportDeclaration[] {
+  const bindingCountsByImportDeclaration = new Map<
+    ParsedImportDeclaration,
+    ImportBindingCounts
+  >();
+  const currentBindingCountsByRequest = new Map<string, ImportBindingCounts>();
+  const minimumMergeTargetIndexByRequest = new Map<string, number>();
 
-  for (const rawImport of imports) {
-    const importDecl = normalizeTypeClause(rawImport);
+  for (const importDeclaration of importDeclarations) {
+    const importRequestKey = getImportRequestKey(importDeclaration);
 
-    // 副作用导入以及 `import type X` / `import type * as X` 这类无法与普通 import 在同一语句里
-    // 表达 type 修饰的形式，保持独立，不参与合并。
-    if (importDecl.sideEffect || importDecl.typeClause) {
-      result.push(importDecl);
+    if (importDeclaration.isMergeBoundary) {
+      currentBindingCountsByRequest.delete(importRequestKey);
       continue;
     }
-    const mergeKey = `${importDecl.source}\0${importDecl.attributes ?? ''}`;
-    const existingIndex = indexByKey.get(mergeKey);
-
-    if (existingIndex === undefined) {
-      indexByKey.set(mergeKey, result.length);
-      result.push(importDecl);
+    if (
+      importDeclaration.verbatimDeclaration !== null ||
+      importDeclaration.isSideEffectOnly
+    ) {
       continue;
     }
-    const existing = result[existingIndex]!;
+    const bindingCounts = currentBindingCountsByRequest.get(
+      importRequestKey,
+    ) ?? {
+      defaultBindingCount: 0,
+      namespaceBindingCount: 0,
+    };
 
-    // 正常情况只有一条可能包含 defaultSpec / namespaceSpec；如有冲突以首条为准。
-    // attributes 必然相同（已编入 mergeKey），直接复用 existing 的即可。
-    result[existingIndex] = {
-      source: existing.source,
-      typeClause: false,
-      sideEffect: false,
-      defaultSpec: existing.defaultSpec ?? importDecl.defaultSpec,
-      namespaceSpec: existing.namespaceSpec ?? importDecl.namespaceSpec,
-      members:
-        existing.members === null && importDecl.members === null
-          ? null
-          : [...(existing.members ?? []), ...(importDecl.members ?? [])],
-      attributes: existing.attributes,
-      // 后续重复条目的注释直接丢弃。
-      leadingComments: existing.leadingComments,
+    if (importDeclaration.defaultBinding !== null) {
+      bindingCounts.defaultBindingCount++;
+    }
+    if (importDeclaration.namespaceBinding !== null) {
+      bindingCounts.namespaceBindingCount++;
+    }
+    currentBindingCountsByRequest.set(importRequestKey, bindingCounts);
+    bindingCountsByImportDeclaration.set(importDeclaration, bindingCounts);
+  }
+  const mergedImportDeclarations: ParsedImportDeclaration[] = [];
+
+  for (const originalImportDeclaration of importDeclarations) {
+    const importDeclaration = normalizeNamedTypeOnlyImport(
+      originalImportDeclaration,
+    );
+    const importRequestKey = getImportRequestKey(importDeclaration);
+    const bindingCounts = bindingCountsByImportDeclaration.get(
+      originalImportDeclaration,
+    ) ?? {
+      defaultBindingCount: 0,
+      namespaceBindingCount: 0,
+    };
+    const minimumMergeTargetIndex =
+      minimumMergeTargetIndexByRequest.get(importRequestKey) ?? 0;
+    const mergeTargetIndex = mergedImportDeclarations.findIndex(
+      (existingImportDeclaration, existingImportIndex) =>
+        existingImportIndex >= minimumMergeTargetIndex &&
+        isImportDeclarationMergeSafe(
+          existingImportDeclaration,
+          importDeclaration,
+          bindingCounts,
+        ),
+    );
+
+    if (mergeTargetIndex < 0) {
+      mergedImportDeclarations.push(importDeclaration);
+    } else {
+      mergedImportDeclarations[mergeTargetIndex] = mergeImportDeclarations(
+        mergedImportDeclarations[mergeTargetIndex]!,
+        importDeclaration,
+      );
+    }
+    if (importDeclaration.isMergeBoundary) {
+      minimumMergeTargetIndexByRequest.set(
+        importRequestKey,
+        mergedImportDeclarations.length,
+      );
+    }
+  }
+  return mergedImportDeclarations;
+}
+
+/**
+ * 按配置转换 type import。
+ * 带注释或 import attributes 的声明不会被拆分，避免改变注释归属或模块请求。
+ */
+function applyTypeImportStyle(
+  importDeclaration: ParsedImportDeclaration,
+  typeImportStyle: TypeImportStyle,
+): ParsedImportDeclaration[] {
+  if (
+    importDeclaration.verbatimDeclaration !== null ||
+    !importDeclaration.namedSpecifiers
+  ) {
+    return [importDeclaration];
+  }
+  const namedSpecifiers = importDeclaration.namedSpecifiers;
+
+  if (typeImportStyle === 'separate') {
+    if (importDeclaration.isTypeOnly) {
+      return [
+        {
+          ...importDeclaration,
+          namedSpecifiers: sortNamedImportSpecifiers(namedSpecifiers),
+        },
+      ];
+    }
+    const typeSpecifiers = namedSpecifiers.filter(
+      importSpecifier => importSpecifier.isTypeOnly,
+    );
+    const valueSpecifiers = namedSpecifiers.filter(
+      importSpecifier => !importSpecifier.isTypeOnly,
+    );
+
+    if (
+      typeSpecifiers.length > 0 &&
+      (importDeclaration.importAttributes !== null ||
+        importDeclaration.leadingCommentsText.trim() !== '' ||
+        importDeclaration.trailingCommentsText !== '')
+    ) {
+      return [
+        {
+          ...importDeclaration,
+          namedSpecifiers: sortNamedImportSpecifiers(namedSpecifiers),
+        },
+      ];
+    }
+    const styledImportDeclarations: ParsedImportDeclaration[] = [];
+
+    if (typeSpecifiers.length > 0) {
+      styledImportDeclarations.push({
+        ...importDeclaration,
+        isTypeOnly: true,
+        defaultBinding: null,
+        namespaceBinding: null,
+        namedSpecifiers: sortNamedImportSpecifiers(
+          typeSpecifiers.map(importSpecifier => ({
+            ...importSpecifier,
+            isTypeOnly: false,
+          })),
+        ),
+      });
+    }
+    if (
+      valueSpecifiers.length > 0 ||
+      importDeclaration.defaultBinding !== null ||
+      importDeclaration.namespaceBinding !== null
+    ) {
+      let namedValueSpecifiers: ParsedImportSpecifier[] | null = null;
+
+      if (valueSpecifiers.length > 0) {
+        namedValueSpecifiers = sortNamedImportSpecifiers(valueSpecifiers);
+      }
+      let leadingCommentsText = importDeclaration.leadingCommentsText;
+
+      if (typeSpecifiers.length > 0) {
+        leadingCommentsText = '';
+      }
+      styledImportDeclarations.push({
+        ...importDeclaration,
+        namedSpecifiers: namedValueSpecifiers,
+        leadingCommentsText,
+      });
+    }
+    return styledImportDeclarations;
+  }
+  let inlineImportDeclaration = { ...importDeclaration, namedSpecifiers };
+
+  if (importDeclaration.isTypeOnly) {
+    inlineImportDeclaration = {
+      ...importDeclaration,
+      isTypeOnly: false,
+      namedSpecifiers: namedSpecifiers.map(importSpecifier => ({
+        ...importSpecifier,
+        isTypeOnly: true,
+      })),
     };
   }
-  return result;
-}
-
-/** members 非空的 ParsedImport，用于需要操作命名导入块的内部函数。 */
-type ImportWithMembers = ParsedImport & { members: Member[] };
-
-/**
- * 根据 importOrderTypeImports 策略改写单条 import，依模式返回 1～2 条。
- */
-function applyTypeImports(
-  importDecl: ParsedImport,
-  style: TypeImportsStyle,
-): ParsedImport[] {
-  // 副作用 import 和没有命名导入块的语句无需转换。
-  if (importDecl.sideEffect || !importDecl.members) {
-    return [importDecl];
-  }
-
-  // separate 模式：`import type { … }` 保持独立语句。
-  if (style === 'separate') {
-    if (importDecl.typeClause) {
-      return [importDecl];
-    }
-    const typeMembers = importDecl.members.filter(member => member.isType);
-    const valueMembers = importDecl.members.filter(member => !member.isType);
-    const output: ParsedImport[] = [];
-
-    if (typeMembers.length > 0) {
-      output.push({
-        source: importDecl.source,
-        typeClause: true,
-        sideEffect: false,
-        defaultSpec: null,
-        namespaceSpec: null,
-        members: sortMembersAlpha(
-          typeMembers.map(member => ({ ...member, isType: false })),
+  if (typeImportStyle === 'mixed') {
+    return [
+      {
+        ...inlineImportDeclaration,
+        namedSpecifiers: sortNamedImportSpecifiers(
+          inlineImportDeclaration.namedSpecifiers,
         ),
-        attributes: importDecl.attributes,
-        leadingComments: importDecl.leadingComments,
-      });
-    }
-    const hasValueBody =
-      valueMembers.length > 0 ||
-      importDecl.defaultSpec !== null ||
-      importDecl.namespaceSpec !== null;
-
-    if (hasValueBody) {
-      output.push({
-        ...importDecl,
-        members:
-          valueMembers.length > 0 ? sortMembersAlpha(valueMembers) : null,
-        // 避免在两个拆分出的语句中都出现相同的首行注释。
-        leadingComments:
-          typeMembers.length > 0 ? '' : importDecl.leadingComments,
-      });
-    }
-    return output.length > 0 ? output : [importDecl];
+      },
+    ];
   }
+  const typeSpecifiers = sortNamedImportSpecifiers(
+    inlineImportDeclaration.namedSpecifiers.filter(
+      importSpecifier => importSpecifier.isTypeOnly,
+    ),
+  );
+  const valueSpecifiers = sortNamedImportSpecifiers(
+    inlineImportDeclaration.namedSpecifiers.filter(
+      importSpecifier => !importSpecifier.isTypeOnly,
+    ),
+  );
 
-  // inline 模式：将 `import type { X, Y }` 改写为 `import { type X, type Y }`。
-  // 所有成员标记为 type 后，inline-first / inline-last 的内部排序逻辑一致。
-  const inlineBase: ImportWithMembers = importDecl.typeClause
-    ? {
-        ...importDecl,
-        typeClause: false,
-        members: importDecl.members.map(member => ({
-          ...member,
-          isType: true,
-        })),
-      }
-    : { ...importDecl, members: importDecl.members };
+  let orderedSpecifiers = [...valueSpecifiers, ...typeSpecifiers];
 
-  if (style === 'mixed') {
-    return [{ ...inlineBase, members: sortMembersAlpha(inlineBase.members) }];
+  if (typeImportStyle === 'inline-first') {
+    orderedSpecifiers = [...typeSpecifiers, ...valueSpecifiers];
   }
-
-  const typeMembers = inlineBase.members.filter(member => member.isType);
-  const valueMembers = inlineBase.members.filter(member => !member.isType);
-  const sortedTypes = sortMembersAlpha(typeMembers);
-  const sortedValues = sortMembersAlpha(valueMembers);
-  const ordered =
-    style === 'inline-first'
-      ? [...sortedTypes, ...sortedValues]
-      : [...sortedValues, ...sortedTypes];
-
-  return [{ ...inlineBase, members: ordered }];
+  return [{ ...inlineImportDeclaration, namedSpecifiers: orderedSpecifiers }];
 }
 
-/**
- * 对一段不含副作用导入的 import 列表进行排序并渲染为行数组。
- * 副作用导入在 sortImports 层面已被拆分到各自的 chunk，此处只处理同一 chunk 内的普通 import。
- */
-function sortSegment(
-  imports: ParsedImport[],
-  options: Required<SortOptions>,
-  groupIndex: Map<ImportGroup, number>,
-  fallback: number,
-): string[] {
-  if (imports.length === 0) {
-    return [];
+function getImportBindingShapeRank(
+  importDeclaration: ParsedImportDeclaration,
+): number {
+  if (importDeclaration.defaultBinding !== null) {
+    return 0;
   }
-  const style = options.importOrderTypeImports;
-  const deduplicated = options.importOrderMergeDuplicates
-    ? mergeImportsFromSameSource(imports)
-    : imports;
-  const rewritten = deduplicated.flatMap(importDecl =>
-    applyTypeImports(importDecl, style),
+  if (importDeclaration.namespaceBinding !== null) {
+    return 1;
+  }
+  return 2;
+}
+
+function sortImportSegment(
+  importDeclarations: readonly ParsedImportDeclaration[],
+  sortOptions: Required<SortOptions>,
+  importGroupOrder: ReadonlyMap<ImportGroup, number>,
+): string[] {
+  let mergedImportDeclarations = [...importDeclarations];
+
+  if (sortOptions.esmImportMerge) {
+    mergedImportDeclarations = mergeCompatibleImports(importDeclarations);
+  }
+  const styledImportDeclarations = mergedImportDeclarations.flatMap(
+    importDeclaration =>
+      applyTypeImportStyle(importDeclaration, sortOptions.esmImportTypeStyle),
   );
-  const decorated = rewritten.map((importDecl, index) => ({
-    importDecl,
-    group: detectGroup(importDecl.source),
-    originalIndex: index,
-  }));
+  const unlistedGroupRank = sortOptions.esmImportGroups.length;
+  const rankedImportDeclarations = styledImportDeclarations.map(
+    (importDeclaration, originalIndex) => ({
+      importDeclaration,
+      importGroup: classifyImportGroup(importDeclaration.moduleSpecifier),
+      originalIndex,
+    }),
+  );
 
-  decorated.sort((a, b) => {
-    const groupOrderA = groupIndex.get(a.group) ?? fallback;
-    const groupOrderB = groupIndex.get(b.group) ?? fallback;
+  rankedImportDeclarations.sort((left, right) => {
+    const groupRankDifference =
+      (importGroupOrder.get(left.importGroup) ?? unlistedGroupRank) -
+      (importGroupOrder.get(right.importGroup) ?? unlistedGroupRank);
 
-    if (groupOrderA !== groupOrderB) {
-      return groupOrderA - groupOrderB;
+    if (groupRankDifference !== 0) {
+      return groupRankDifference;
     }
-    const sourceA = a.importDecl.source.toLowerCase();
-    const sourceB = b.importDecl.source.toLowerCase();
+    const moduleSpecifierDifference =
+      left.importDeclaration.moduleSpecifier.localeCompare(
+        right.importDeclaration.moduleSpecifier,
+        'en',
+        { sensitivity: 'base' },
+      );
 
-    if (sourceA !== sourceB) {
-      return sourceA < sourceB ? -1 : 1;
+    if (moduleSpecifierDifference !== 0) {
+      return moduleSpecifierDifference;
     }
-    // 同一来源内，type-only 部分优先。
-    if (a.importDecl.typeClause !== b.importDecl.typeClause) {
-      return a.importDecl.typeClause ? -1 : 1;
+    if (
+      left.importDeclaration.isTypeOnly !== right.importDeclaration.isTypeOnly
+    ) {
+      if (left.importDeclaration.isTypeOnly) {
+        return -1;
+      }
+      return 1;
     }
-    return a.originalIndex - b.originalIndex;
+    return (
+      getImportBindingShapeRank(left.importDeclaration) -
+        getImportBindingShapeRank(right.importDeclaration) ||
+      left.originalIndex - right.originalIndex
+    );
   });
 
-  const lines: string[] = [];
-  let previousGroup: ImportGroup | null = null;
+  let previousImportGroup: ImportGroup | null = null;
+  const renderedImportLines: string[] = [];
 
-  for (const item of decorated) {
+  for (const { importDeclaration, importGroup } of rankedImportDeclarations) {
     if (
-      options.importOrderSeparation &&
-      previousGroup !== null &&
-      item.group !== previousGroup
+      sortOptions.esmImportSeparation &&
+      previousImportGroup !== null &&
+      importGroup !== previousImportGroup
     ) {
-      lines.push('');
+      renderedImportLines.push('');
     }
-    lines.push(renderImport(item.importDecl));
-    previousGroup = item.group;
+    renderedImportLines.push(renderImportDeclaration(importDeclaration));
+    previousImportGroup = importGroup;
   }
-  return lines;
+  return renderedImportLines;
 }
 
-export function sortImports(text: string, rawOptions: ParserOptions): string {
-  const options = resolveSortOptions(rawOptions);
+/** 副作用 import 保持原顺序，并把普通 import 分隔为独立排序片段。 */
+function renderSortedImportLines(
+  importDeclarations: readonly ParsedImportDeclaration[],
+  sortOptions: Required<SortOptions>,
+): string[] {
+  let currentSortableImportDeclarations: ParsedImportDeclaration[] = [];
 
-  if (!options.importOrder) {
-    return text;
-  }
-  const block = extractImportBlock(text);
-
-  if (!block || block.statements.length === 0) {
-    return text;
-  }
-  const parsed = block.statements
-    .map(rawStatement => parseImport(rawStatement))
-    .filter((importDecl): importDecl is ParsedImport => importDecl !== null);
-
-  if (parsed.length === 0) {
-    return text;
-  }
-
-  const groupIndex = new Map<ImportGroup, number>(
-    options.importOrderGroups.map((group, index): [ImportGroup, number] => [
-      group,
-      index,
+  const importGroupOrder = new Map<ImportGroup, number>(
+    sortOptions.esmImportGroups.map((importGroup, groupIndex) => [
+      importGroup,
+      groupIndex,
     ]),
   );
-  const fallback = options.importOrderGroups.length;
-
-  // 副作用导入将 import 块切割为若干 chunk，每个 chunk 独立排序。
-  // 副作用导入本身保持原位不移动，遵循社区关于副作用 import 顺序有语义的共识。
-  type Chunk =
-    | { kind: 'segment'; imports: ParsedImport[] }
-    | { kind: 'side-effect'; importDecl: ParsedImport };
-
-  const chunks: Chunk[] = [];
-  let currentSegment: ParsedImport[] = [];
-
-  for (const importDecl of parsed) {
-    if (importDecl.sideEffect) {
-      if (currentSegment.length > 0) {
-        chunks.push({ kind: 'segment', imports: currentSegment });
-        currentSegment = [];
+  const importDeclarationChunks: Array<
+    | {
+        kind: 'sortable';
+        importDeclarations: ParsedImportDeclaration[];
       }
-      chunks.push({ kind: 'side-effect', importDecl });
-    } else {
-      currentSegment.push(importDecl);
+    | {
+        kind: 'side-effect';
+        importDeclaration: ParsedImportDeclaration;
+      }
+  > = [];
+
+  for (const importDeclaration of importDeclarations) {
+    if (!importDeclaration.isSideEffectOnly) {
+      currentSortableImportDeclarations.push(importDeclaration);
+      continue;
     }
+    if (currentSortableImportDeclarations.length > 0) {
+      importDeclarationChunks.push({
+        kind: 'sortable',
+        importDeclarations: currentSortableImportDeclarations,
+      });
+      currentSortableImportDeclarations = [];
+    }
+    importDeclarationChunks.push({ kind: 'side-effect', importDeclaration });
   }
-  if (currentSegment.length > 0) {
-    chunks.push({ kind: 'segment', imports: currentSegment });
+  if (currentSortableImportDeclarations.length > 0) {
+    importDeclarationChunks.push({
+      kind: 'sortable',
+      importDeclarations: currentSortableImportDeclarations,
+    });
   }
+  let previousChunkKind: 'sortable' | 'side-effect' | null = null;
+  const renderedImportLines: string[] = [];
 
-  const allLines: string[] = [];
-  // chunk 类型切换时插入空行（连续的副作用 import 之间不插）。
-  let previousKind: Chunk['kind'] | null = null;
-
-  for (const chunk of chunks) {
+  for (const importChunk of importDeclarationChunks) {
     if (
-      previousKind !== null &&
-      previousKind !== chunk.kind &&
-      options.importOrderSeparation
+      sortOptions.esmImportSeparation &&
+      previousChunkKind !== null &&
+      previousChunkKind !== importChunk.kind
     ) {
-      allLines.push('');
+      renderedImportLines.push('');
     }
-    if (chunk.kind === 'segment') {
-      allLines.push(
-        ...sortSegment(chunk.imports, options, groupIndex, fallback),
+    if (importChunk.kind === 'sortable') {
+      renderedImportLines.push(
+        ...sortImportSegment(
+          importChunk.importDeclarations,
+          sortOptions,
+          importGroupOrder,
+        ),
       );
     } else {
-      allLines.push(renderImport(chunk.importDecl));
+      renderedImportLines.push(
+        renderImportDeclaration(importChunk.importDeclaration),
+      );
     }
-    previousKind = chunk.kind;
+    previousChunkKind = importChunk.kind;
   }
+  return renderedImportLines;
+}
 
-  const replacement = allLines.join('\n');
-  const trailing = text.slice(block.end);
-  // 当 import 块后还有其他代码时，保证两者之间始终有一个空行。
-  const nonBlankIndex = trailing.search(/\S/);
-  const suffix =
-    nonBlankIndex >= 0 ? '\n\n' + trailing.slice(nonBlankIndex) : trailing;
+interface SortableImportEntry {
+  importDeclarationNode: ParserAstNode;
+  start: number;
+  end: number;
+  parsedImportDeclaration: ParsedImportDeclaration;
+}
 
-  return text.slice(0, block.start) + replacement + suffix;
+function isCommentPresentWithinRange(
+  sortedComments: readonly ParserAstCommentWithTextRange[],
+  start: number,
+  end: number,
+): boolean {
+  const firstCommentIndex = findCommentIndexAtOrAfter(sortedComments, start);
+  const firstComment = sortedComments[firstCommentIndex];
+
+  return firstComment !== undefined && firstComment.textRange.end <= end;
+}
+
+function hasPositionSensitiveEslintCommentWithinRange(
+  sourceText: string,
+  sortedComments: readonly ParserAstCommentWithTextRange[],
+  start: number,
+  end: number,
+): boolean {
+  for (
+    let commentIndex = findCommentIndexAtOrAfter(sortedComments, start);
+    commentIndex < sortedComments.length;
+    commentIndex++
+  ) {
+    const parserComment = sortedComments[commentIndex];
+
+    if (!parserComment || parserComment.textRange.start >= end) {
+      return false;
+    }
+    if (
+      parserComment.textRange.end <= end &&
+      isPositionSensitiveEslintComment(sourceText, parserComment)
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function buildImportSegmentEdits(
+  sourceText: string,
+  importEntries: readonly SortableImportEntry[],
+  sortOptions: Required<SortOptions>,
+  lineEnding: string,
+  isBlankLineRequired: boolean,
+): SourceTextEdit[] | null {
+  const [firstImportEntry] = importEntries;
+
+  if (!firstImportEntry) {
+    return null;
+  }
+  let trailingLineBreaks = lineEnding;
+
+  const replacementText = renderSortedImportLines(
+    importEntries.map(importEntry => importEntry.parsedImportDeclaration),
+    sortOptions,
+  ).join(lineEnding);
+  const removalEdits: SourceTextEdit[] = importEntries
+    .slice(1)
+    .map(importEntry => ({
+      start: importEntry.start,
+      end: importEntry.end,
+      replacementText: '',
+    }));
+
+  if (isBlankLineRequired) {
+    const textWithoutLaterImports = applySourceTextEdits(
+      sourceText,
+      removalEdits,
+    );
+
+    if (textWithoutLaterImports === null) {
+      return null;
+    }
+    const isFollowingContentPresent =
+      textWithoutLaterImports.slice(firstImportEntry.end).trim() !== '';
+
+    if (isFollowingContentPresent) {
+      trailingLineBreaks += lineEnding;
+    }
+  }
+  return [
+    {
+      start: firstImportEntry.start,
+      end: firstImportEntry.end,
+      replacementText: replacementText + trailingLineBreaks,
+    },
+    ...removalEdits,
+  ];
+}
+
+/**
+ * 将顶层 import 划分为可独立排序的片段，并生成基于原文范围的编辑。
+ * 被忽略的声明、独立注释和位置敏感指令不会进入编辑范围。
+ */
+export function buildImportSortingEdits(
+  sourceText: string,
+  programStatements: readonly ParserAstNode[],
+  sortedComments: readonly ParserAstCommentWithTextRange[],
+  sortOptions: Required<SortOptions>,
+  isPrettierFilePragmaPresent: boolean,
+): SourceTextEdit[] {
+  const importDeclarationNodes = programStatements.filter(
+    statement => statement.type === 'ImportDeclaration',
+  );
+
+  if (importDeclarationNodes.length === 0) {
+    return [];
+  }
+  const prettierFilePragmaComment = getPrettierFilePragmaComment(
+    sortedComments,
+    isPrettierFilePragmaPresent,
+  );
+
+  if (isPrettierFilePragmaPresent && !prettierFilePragmaComment) {
+    return [];
+  }
+  let currentSortableSegment: SortableImportEntry[] = [];
+  const sortableSegments: SortableImportEntry[][] = [];
+
+  for (const importDeclarationNode of importDeclarationNodes) {
+    const declarationRange = getAstNodeTextRange(importDeclarationNode);
+
+    if (!declarationRange) {
+      return [];
+    }
+    if (
+      hasPositionSensitiveEslintCommentWithinRange(
+        sourceText,
+        sortedComments,
+        declarationRange.start,
+        declarationRange.end,
+      )
+    ) {
+      return [];
+    }
+    const isImportIgnoredByPrettier = isPrettierIgnored(
+      sourceText,
+      declarationRange,
+      sortedComments,
+    );
+    const leadingCommentsStart = findLeadingCommentsStart(
+      sourceText,
+      declarationRange.start,
+      sortedComments,
+      prettierFilePragmaComment,
+    );
+    const trailingComments = getTrailingComments(
+      sourceText,
+      declarationRange.end,
+      sortedComments,
+    );
+
+    if (isImportIgnoredByPrettier || trailingComments.isImportSortingBoundary) {
+      if (currentSortableSegment.length > 0) {
+        sortableSegments.push(currentSortableSegment);
+        currentSortableSegment = [];
+      }
+      continue;
+    }
+    const parsedImportDeclaration = parseImportDeclaration(
+      {
+        importDeclarationNode,
+        declarationRange,
+        leadingCommentsText: sourceText.slice(
+          leadingCommentsStart,
+          declarationRange.start,
+        ),
+        trailingCommentsText: trailingComments.commentsText,
+        hasInternalComments: isCommentPresentWithinRange(
+          sortedComments,
+          declarationRange.start,
+          declarationRange.end,
+        ),
+      },
+      sourceText,
+    );
+
+    if (parsedImportDeclaration === null) {
+      return [];
+    }
+    const parsedImportEntry: SortableImportEntry = {
+      importDeclarationNode,
+      start: leadingCommentsStart,
+      end: getRangeEndIncludingLineBreak(sourceText, trailingComments.rangeEnd),
+      parsedImportDeclaration,
+    };
+    const previousImportEntry = currentSortableSegment.at(-1);
+
+    if (
+      previousImportEntry &&
+      isCommentPresentWithinRange(
+        sortedComments,
+        previousImportEntry.end,
+        parsedImportEntry.start,
+      )
+    ) {
+      sortableSegments.push(currentSortableSegment);
+      currentSortableSegment = [];
+    }
+    currentSortableSegment.push(parsedImportEntry);
+  }
+  if (currentSortableSegment.length > 0) {
+    sortableSegments.push(currentSortableSegment);
+  }
+  let lineEnding = '\n';
+
+  if (sourceText.includes('\r\n')) {
+    lineEnding = '\r\n';
+  }
+  const sortingEdits: SourceTextEdit[] = [];
+  const lastImportDeclarationNode = importDeclarationNodes.at(-1);
+
+  for (const sortableSegment of sortableSegments) {
+    const isLastImportSegment =
+      sortableSegment.at(-1)?.importDeclarationNode ===
+      lastImportDeclarationNode;
+    const importSegmentEdits = buildImportSegmentEdits(
+      sourceText,
+      sortableSegment,
+      sortOptions,
+      lineEnding,
+      isLastImportSegment,
+    );
+
+    if (importSegmentEdits === null) {
+      return [];
+    }
+    sortingEdits.push(...importSegmentEdits);
+  }
+  return sortingEdits;
 }

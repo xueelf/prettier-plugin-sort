@@ -1,43 +1,33 @@
 import { type ParserOptions, type SupportOptions } from 'prettier';
 
-/** import 分组，参考 eslint-plugin-import 的 import/order 规则。 */
+/** import 声明分组。 */
 export type ImportGroup =
-  | 'builtin'
-  | 'external'
-  | 'internal'
-  | 'parent'
-  | 'sibling'
-  | 'index';
+  'builtin' | 'external' | 'internal' | 'parent' | 'sibling' | 'index';
 
-/** `import type` 内联风格，参考 @typescript-eslint/consistent-type-imports 的 fixStyle 选项。 */
-export type TypeImportsStyle =
-  | 'separate'
-  | 'inline-first'
-  | 'inline-last'
-  | 'mixed';
+/** type import 的声明形式与成员顺序。 */
+export type TypeImportStyle =
+  'separate' | 'inline-first' | 'inline-last' | 'mixed';
 
 /** 插件排序配置。 */
 export interface SortOptions {
-  importOrder?: boolean;
-  importOrderGroups?: ImportGroup[];
-  importOrderSeparation?: boolean;
-  importOrderTypeImports?: TypeImportsStyle;
-  importOrderMergeDuplicates?: boolean;
-  exportOrder?: boolean;
-  packageJsonOrder?: boolean;
-  packageJsonOrderExcludeKeys?: string[];
+  esmImportSort?: boolean;
+  esmImportGroups?: ImportGroup[];
+  esmImportSeparation?: boolean;
+  esmImportTypeStyle?: TypeImportStyle;
+  esmImportMerge?: boolean;
+  esmExportSpecifierSort?: boolean;
+  packageSort?: boolean;
 }
 
 /** 默认排序配置。 */
-export const DEFAULT_SORT_OPTIONS: Required<SortOptions> = {
-  importOrder: true,
-  importOrderGroups: ['builtin', 'external', 'parent', 'sibling', 'index'],
-  importOrderSeparation: true,
-  importOrderTypeImports: 'separate',
-  importOrderMergeDuplicates: true,
-  exportOrder: true,
-  packageJsonOrder: true,
-  packageJsonOrderExcludeKeys: [],
+const DEFAULT_SORT_OPTIONS: Required<SortOptions> = {
+  esmImportSort: true,
+  esmImportGroups: ['builtin', 'external', 'parent', 'sibling', 'index'],
+  esmImportSeparation: true,
+  esmImportTypeStyle: 'separate',
+  esmImportMerge: true,
+  esmExportSpecifierSort: true,
+  packageSort: true,
 };
 
 /** 有效的 import 分组值。 */
@@ -50,146 +40,151 @@ const VALID_IMPORT_GROUPS: ReadonlySet<string> = new Set<ImportGroup>([
   'index',
 ]);
 
-/** 有效的 import type 内联风格值。 */
-const VALID_TYPE_STYLES: ReadonlySet<string> = new Set<TypeImportsStyle>([
+/** 有效的 type import 风格值。 */
+const VALID_TYPE_IMPORT_STYLES: ReadonlySet<string> = new Set<TypeImportStyle>([
   'separate',
   'inline-first',
   'inline-last',
   'mixed',
 ]);
 
-const isValidImportGroup = (value: unknown): value is ImportGroup =>
-  typeof value === 'string' && VALID_IMPORT_GROUPS.has(value);
+const isValidImportGroup = (
+  candidateValue: unknown,
+): candidateValue is ImportGroup =>
+  typeof candidateValue === 'string' && VALID_IMPORT_GROUPS.has(candidateValue);
 
-const isValidTypeStyle = (value: unknown): value is TypeImportsStyle =>
-  typeof value === 'string' && VALID_TYPE_STYLES.has(value);
+const isValidTypeImportStyle = (
+  candidateValue: unknown,
+): candidateValue is TypeImportStyle =>
+  typeof candidateValue === 'string' &&
+  VALID_TYPE_IMPORT_STYLES.has(candidateValue);
 
-type RawSortOptions = ParserOptions & Partial<SortOptions>;
+type SortPluginParserOptions = ParserOptions & SortOptions;
+type BooleanSortOptionName = Exclude<
+  keyof SortOptions,
+  'esmImportGroups' | 'esmImportTypeStyle'
+>;
 
-function resolveBoolean<K extends keyof SortOptions>(
-  rawOptions: RawSortOptions,
-  key: K,
+function resolveBooleanSortOption(
+  prettierOptions: SortPluginParserOptions,
+  optionName: BooleanSortOptionName,
 ): boolean {
-  const raw = rawOptions[key];
-  return typeof raw === 'boolean'
-    ? raw
-    : (DEFAULT_SORT_OPTIONS[key] as boolean);
+  const configuredValue = prettierOptions[optionName];
+
+  if (typeof configuredValue === 'boolean') {
+    return configuredValue;
+  }
+  return DEFAULT_SORT_OPTIONS[optionName];
 }
 
 /**
  * 从 Prettier 选项中提取插件配置，缺失或非法的参数会回退为默认值。
  */
 export function resolveSortOptions(
-  rawOptions: RawSortOptions,
+  prettierOptions: SortPluginParserOptions,
 ): Required<SortOptions> {
-  const groups = Array.isArray(rawOptions.importOrderGroups)
-    ? rawOptions.importOrderGroups.filter(isValidImportGroup)
+  const configuredImportGroups = Array.isArray(prettierOptions.esmImportGroups)
+    ? [...new Set(prettierOptions.esmImportGroups.filter(isValidImportGroup))]
     : [];
-
-  const excludeKeys = Array.isArray(rawOptions.packageJsonOrderExcludeKeys)
-    ? rawOptions.packageJsonOrderExcludeKeys.filter(
-        (key): key is string => typeof key === 'string',
-      )
-    : [];
-
-  const importOrderTypeImports = isValidTypeStyle(
-    rawOptions.importOrderTypeImports,
+  const remainingDefaultImportGroups =
+    DEFAULT_SORT_OPTIONS.esmImportGroups.filter(
+      importGroup => !configuredImportGroups.includes(importGroup),
+    );
+  const resolvedImportGroups =
+    configuredImportGroups.length > 0
+      ? [...configuredImportGroups, ...remainingDefaultImportGroups]
+      : [...DEFAULT_SORT_OPTIONS.esmImportGroups];
+  const resolvedTypeImportStyle = isValidTypeImportStyle(
+    prettierOptions.esmImportTypeStyle,
   )
-    ? rawOptions.importOrderTypeImports
-    : DEFAULT_SORT_OPTIONS.importOrderTypeImports;
+    ? prettierOptions.esmImportTypeStyle
+    : DEFAULT_SORT_OPTIONS.esmImportTypeStyle;
 
   return {
-    importOrder: resolveBoolean(rawOptions, 'importOrder'),
-    importOrderGroups:
-      groups.length > 0 ? groups : [...DEFAULT_SORT_OPTIONS.importOrderGroups],
-    importOrderSeparation: resolveBoolean(rawOptions, 'importOrderSeparation'),
-    importOrderTypeImports,
-    importOrderMergeDuplicates: resolveBoolean(
-      rawOptions,
-      'importOrderMergeDuplicates',
+    esmImportSort: resolveBooleanSortOption(prettierOptions, 'esmImportSort'),
+    esmImportGroups: resolvedImportGroups,
+    esmImportSeparation: resolveBooleanSortOption(
+      prettierOptions,
+      'esmImportSeparation',
     ),
-    exportOrder: resolveBoolean(rawOptions, 'exportOrder'),
-    packageJsonOrder: resolveBoolean(rawOptions, 'packageJsonOrder'),
-    packageJsonOrderExcludeKeys: excludeKeys,
+    esmImportTypeStyle: resolvedTypeImportStyle,
+    esmImportMerge: resolveBooleanSortOption(prettierOptions, 'esmImportMerge'),
+    esmExportSpecifierSort: resolveBooleanSortOption(
+      prettierOptions,
+      'esmExportSpecifierSort',
+    ),
+    packageSort: resolveBooleanSortOption(prettierOptions, 'packageSort'),
   };
 }
 
-/** 注册到 Prettier 的选项定义。使用功能名词前缀命名，因为 Prettier API 不支持嵌套的选项对象。 */
+/** Prettier 插件选项。 */
 export const options: SupportOptions = {
-  importOrder: {
+  esmImportSort: {
     type: 'boolean',
-    default: DEFAULT_SORT_OPTIONS.importOrder,
-    category: 'SortImports',
-    description: 'Sort `import` declarations in JS/TS files.',
+    default: DEFAULT_SORT_OPTIONS.esmImportSort,
+    category: 'ES Module Imports',
+    description:
+      'Sort top-level ES module import declarations and named specifiers.',
   },
-  importOrderGroups: {
+  esmImportGroups: {
     type: 'string',
     array: true,
-    default: [{ value: [...DEFAULT_SORT_OPTIONS.importOrderGroups] }],
-    category: 'SortImports',
+    default: [{ value: [...DEFAULT_SORT_OPTIONS.esmImportGroups] }],
+    category: 'ES Module Imports',
     description:
-      'Ordered list of import groups. Valid values: "builtin", "external", "internal", "parent", "sibling", "index". Each group is sorted alphabetically; unknown groups are ignored.',
+      'Set import group order. Valid groups: "builtin", "external", "internal", "parent", "sibling", and "index". Unlisted groups sort after listed groups.',
   },
-  importOrderSeparation: {
+  esmImportSeparation: {
     type: 'boolean',
-    default: DEFAULT_SORT_OPTIONS.importOrderSeparation,
-    category: 'SortImports',
-    description: 'Insert a blank line between adjacent import groups.',
+    default: DEFAULT_SORT_OPTIONS.esmImportSeparation,
+    category: 'ES Module Imports',
+    description:
+      'Add blank lines between import groups and around side-effect import boundaries.',
   },
-  importOrderTypeImports: {
+  esmImportTypeStyle: {
     type: 'choice',
-    default: DEFAULT_SORT_OPTIONS.importOrderTypeImports,
-    category: 'SortImports',
-    description: 'How to place `type` imports relative to value imports.',
+    default: DEFAULT_SORT_OPTIONS.esmImportTypeStyle,
+    category: 'ES Module Imports',
+    description:
+      'Format named type imports as separate declarations or inline specifiers.',
     choices: [
       {
         value: 'separate',
-        description: 'Keep `import type { … }` as its own statement.',
+        description: 'Use a separate import type declaration.',
       },
       {
         value: 'inline-first',
-        description:
-          'Inline inside braces, type specifiers before value specifiers.',
+        description: 'Place inline type specifiers before value specifiers.',
       },
       {
         value: 'inline-last',
-        description:
-          'Inline inside braces, type specifiers after value specifiers.',
+        description: 'Place inline type specifiers after value specifiers.',
       },
       {
         value: 'mixed',
         description:
-          'Inline inside braces, alphabetical without distinguishing type from value.',
+          'Use inline type specifiers and sort all specifiers together.',
       },
     ],
   },
-  importOrderMergeDuplicates: {
+  esmImportMerge: {
     type: 'boolean',
-    default: DEFAULT_SORT_OPTIONS.importOrderMergeDuplicates,
-    category: 'SortImports',
-    description:
-      'Merge multiple `import` statements from the same source into one. Side-effect imports are never merged.',
+    default: DEFAULT_SORT_OPTIONS.esmImportMerge,
+    category: 'ES Module Imports',
+    description: 'Merge compatible import declarations from the same module.',
   },
-  exportOrder: {
+  esmExportSpecifierSort: {
     type: 'boolean',
-    default: DEFAULT_SORT_OPTIONS.exportOrder,
-    category: 'SortExports',
+    default: DEFAULT_SORT_OPTIONS.esmExportSpecifierSort,
+    category: 'ES Module Exports',
     description:
-      'Sort named specifiers inside `export { … }` alphabetically. Does not reorder export statements.',
+      'Sort named export specifiers without reordering export declarations.',
   },
-  packageJsonOrder: {
+  packageSort: {
     type: 'boolean',
-    default: DEFAULT_SORT_OPTIONS.packageJsonOrder,
-    category: 'SortPackageJson',
+    default: DEFAULT_SORT_OPTIONS.packageSort,
+    category: 'package.json',
     description:
-      'Sort top-level keys and string-array values inside `package.json`. Dependency maps are always alphabetised regardless of this option.',
-  },
-  packageJsonOrderExcludeKeys: {
-    type: 'string',
-    array: true,
-    default: [{ value: [...DEFAULT_SORT_OPTIONS.packageJsonOrderExcludeKeys] }],
-    category: 'SortPackageJson',
-    description:
-      'Top-level `package.json` keys to leave untouched (no key reordering or array sorting). Takes priority over `packageJsonOrder`.',
+      'Sort package.json fields using the sort-package-json community convention.',
   },
 };

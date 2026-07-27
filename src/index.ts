@@ -1,40 +1,69 @@
 import { type Parser, type ParserOptions, type Plugin } from 'prettier';
-import { parsers as babelParsers } from 'prettier/plugins/babel';
-import { parsers as typescriptParsers } from 'prettier/plugins/typescript';
+import acornPlugin from 'prettier/plugins/acorn';
+import babelPlugin from 'prettier/plugins/babel';
+import flowPlugin from 'prettier/plugins/flow';
+import meriyahPlugin from 'prettier/plugins/meriyah';
+import typescriptPlugin from 'prettier/plugins/typescript';
 
 import { options } from './options';
-import { sortExports } from './sort-exports';
-import { sortImports } from './sort-imports';
-import { sortPackageJson } from './sort-package';
+import { preprocessPackageJson } from './sort-package';
+import { sortTypeScript } from './sort-typescript';
 
-type PreprocessFn = (text: string, options: ParserOptions) => string;
+type ParserPreprocessTransform = (
+  sourceText: string,
+  prettierOptions: ParserOptions,
+  parser: Parser,
+) => string | Promise<string>;
 
-function wrap(parser: Parser, ...transforms: PreprocessFn[]): Parser {
+/** 保留原 parser 的预处理流程，再对其结果执行排序。 */
+function wrapParserPreprocess(
+  parser: Parser,
+  preprocessTransform: ParserPreprocessTransform,
+): Parser {
   return {
     ...parser,
-    async preprocess(text, parserOptions) {
-      let source = parser.preprocess
-        ? await parser.preprocess(text, parserOptions)
-        : text;
+    async preprocess(sourceText, prettierOptions) {
+      let transformedText = sourceText;
 
-      for (const transform of transforms) {
-        source = transform(source, parserOptions);
+      if (parser.preprocess) {
+        transformedText = await parser.preprocess(sourceText, prettierOptions);
       }
-      return source;
+      return preprocessTransform(transformedText, prettierOptions, parser);
     },
   };
 }
 
-const plugin: Plugin = {
+const sortPlugin: Plugin = {
   options,
   parsers: {
-    babel: wrap(babelParsers.babel, sortImports, sortExports),
-    'babel-ts': wrap(babelParsers['babel-ts'], sortImports, sortExports),
-    typescript: wrap(typescriptParsers.typescript, sortImports, sortExports),
-    'json-stringify': wrap(babelParsers['json-stringify'], sortPackageJson),
+    acorn: wrapParserPreprocess(acornPlugin.parsers.acorn, sortTypeScript),
+    babel: wrapParserPreprocess(babelPlugin.parsers.babel, sortTypeScript),
+    'babel-flow': wrapParserPreprocess(
+      babelPlugin.parsers['babel-flow'],
+      sortTypeScript,
+    ),
+    'babel-ts': wrapParserPreprocess(
+      babelPlugin.parsers['babel-ts'],
+      sortTypeScript,
+    ),
+    espree: wrapParserPreprocess(acornPlugin.parsers.espree, sortTypeScript),
+    flow: wrapParserPreprocess(flowPlugin.parsers.flow, sortTypeScript),
+    json: wrapParserPreprocess(babelPlugin.parsers.json, preprocessPackageJson),
+    'json-stringify': wrapParserPreprocess(
+      babelPlugin.parsers['json-stringify'],
+      preprocessPackageJson,
+    ),
+    meriyah: wrapParserPreprocess(
+      meriyahPlugin.parsers.meriyah,
+      sortTypeScript,
+    ),
+    typescript: wrapParserPreprocess(
+      typescriptPlugin.parsers.typescript,
+      sortTypeScript,
+    ),
   },
 };
 
-export default plugin;
+export default sortPlugin;
 export { options } from './options';
-export type { ImportGroup, SortOptions, TypeImportsStyle } from './options';
+export type { ImportGroup, SortOptions, TypeImportStyle } from './options';
