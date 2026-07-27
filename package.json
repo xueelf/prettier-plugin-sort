@@ -39,7 +39,7 @@
     "format": "prettier **/*.ts --write",
     "lint": "eslint **/*.ts",
     "prepare": "husky",
-    "test": "bun test scripts/test/",
+    "test": "bun test tests/",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
