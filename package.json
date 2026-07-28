@@ -29,18 +29,16 @@
       "default": "./dist/index.js"
     }
   },
-  "main": "./dist/index.js",
-  "types": "./dist/index.d.ts",
   "files": [
     "dist"
   ],
   "scripts": {
     "build": "bun run scripts/build.ts",
-    "format": "prettier **/*.{json,ts,md} --write --experimental-cli",
-    "lint": "eslint src/ --cache",
-    "lint:fix": "eslint src/ --fix --cache",
+    "format": "prettier \"**/*.{json,md,ts}\" --write --experimental-cli",
+    "lint": "eslint --cache",
+    "lint:fix": "eslint --fix --cache",
     "prepare": "husky",
-    "test": "bun test tests/",
+    "test": "bun test",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
