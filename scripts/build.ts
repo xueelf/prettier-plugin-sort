@@ -7,8 +7,10 @@ import { compilerOptions } from '~/tsconfig.json';
 
 const buildConfig: BuildConfig = {
   entrypoints: ['src/index.ts'],
-  external: ['prettier', 'semver'],
+  format: 'esm',
   outdir: compilerOptions.outDir,
+  packages: 'external',
+  target: 'browser',
 };
 
 await rm(compilerOptions.outDir, { recursive: true, force: true });
