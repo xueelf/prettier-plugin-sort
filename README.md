@@ -9,7 +9,7 @@ Read this in other languages: English | [中文](./README.zh.md)
 
 ## Install
 
-Requires Prettier 3.7 or newer.
+Requires Prettier 3.9 or newer.
 
 ```shell
 npm i -D prettier prettier-plugin-sort
@@ -182,7 +182,7 @@ Before sorting:
   "name": "example",
   "dependencies": {
     "typescript": "^7.0.0",
-    "prettier": "^3.7.0"
+    "prettier": "^3.9.0"
   }
 }
 ```
@@ -194,7 +194,7 @@ After sorting:
   "name": "example",
   "version": "1.0.0",
   "dependencies": {
-    "prettier": "^3.7.0",
+    "prettier": "^3.9.0",
     "typescript": "^7.0.0"
   }
 }

@@ -9,7 +9,7 @@
 
 ## 安装
 
-需要 Prettier 3.7 或更高版本。
+需要 Prettier 3.9 或更高版本。
 
 ```shell
 npm i -D prettier prettier-plugin-sort
@@ -182,7 +182,7 @@ export { type FC, useEffect, useState } from 'react';
   "name": "example",
   "dependencies": {
     "typescript": "^7.0.0",
-    "prettier": "^3.7.0"
+    "prettier": "^3.9.0"
   }
 }
 ```
@@ -194,7 +194,7 @@ export { type FC, useEffect, useState } from 'react';
   "name": "example",
   "version": "1.0.0",
   "dependencies": {
-    "prettier": "^3.7.0",
+    "prettier": "^3.9.0",
     "typescript": "^7.0.0"
   }
 }

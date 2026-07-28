@@ -17,12 +17,17 @@ import {
   WIREIT_SCRIPT_FIELD_ORDER,
 } from './utils/package-rules';
 
-/** 保留 JSON 数字原文，避免 JavaScript 数值转换改变精度或字面量。 */
-class JsonNumberLiteral {
-  constructor(readonly sourceText: string) {}
+/** 保留 JSON 字符串和数字的源码写法。 */
+class JsonSourceLiteral<Value extends number | string = number | string> {
+  constructor(
+    readonly value: Value,
+    readonly sourceText: string,
+  ) {}
 }
 
-type JsonPrimitive = boolean | JsonNumberLiteral | null | number | string;
+type JsonPathSegment = number | string;
+type JsonPrimitive = boolean | JsonSourceLiteral | null | number | string;
+type JsonStringValue = JsonSourceLiteral<string> | string;
 type JsonValue = JsonObject | JsonPrimitive | JsonValue[];
 
 interface JsonObject extends Record<string, JsonValue> {}
@@ -62,8 +67,29 @@ function isJsonObject(value: unknown): value is JsonObject {
     typeof value === 'object' &&
     value !== null &&
     !Array.isArray(value) &&
-    !(value instanceof JsonNumberLiteral)
+    !(value instanceof JsonSourceLiteral)
   );
+}
+
+function getJsonPathKey(jsonPath: readonly JsonPathSegment[]): string {
+  return JSON.stringify(jsonPath);
+}
+
+function getJsonString(jsonValue: JsonValue | undefined): string | null {
+  if (typeof jsonValue === 'string') {
+    return jsonValue;
+  }
+  if (
+    jsonValue instanceof JsonSourceLiteral &&
+    typeof jsonValue.value === 'string'
+  ) {
+    return jsonValue.value;
+  }
+  return null;
+}
+
+function isJsonStringValue(jsonValue: JsonValue): jsonValue is JsonStringValue {
+  return getJsonString(jsonValue) !== null;
 }
 
 function isParserJsonAstNode(value: unknown): value is ParserJsonAstNode {
@@ -76,13 +102,15 @@ function isParserJsonAstNode(value: unknown): value is ParserJsonAstNode {
 }
 
 /**
- * 使用 parser AST 找回每个数字的源码范围。
- * JSON.parse 只负责校验结构，数字最终仍使用原始字面量。
+ * 使用 parser AST 找回字符串、字段名和数字的源码范围。
+ * JSON.parse 提供排序使用的值，序列化时恢复原始字面量。
  */
-function preserveJsonNumberLiterals(
+function preserveJsonSourceLiterals(
   jsonValue: JsonValue,
   parserJsonNode: ParserJsonAstNode,
   sourceText: string,
+  fieldNameSourceTexts: Map<string, string>,
+  jsonPath: readonly JsonPathSegment[] = [],
 ): JsonValue | undefined {
   if (parserJsonNode.type === 'JsonRoot') {
     const rootNode = parserJsonNode.node;
@@ -90,22 +118,33 @@ function preserveJsonNumberLiterals(
     if (!isParserJsonAstNode(rootNode)) {
       return undefined;
     }
-    return preserveJsonNumberLiterals(jsonValue, rootNode, sourceText);
+    return preserveJsonSourceLiterals(
+      jsonValue,
+      rootNode,
+      sourceText,
+      fieldNameSourceTexts,
+      jsonPath,
+    );
   }
+  const isStringLiteral = parserJsonNode.type === 'StringLiteral';
   const isNumberLiteral = parserJsonNode.type === 'NumericLiteral';
   const isNegativeNumberLiteral =
     parserJsonNode.type === 'UnaryExpression' &&
     parserJsonNode.operator === '-' &&
     parserJsonNode.argument?.type === 'NumericLiteral';
 
-  if (isNumberLiteral || isNegativeNumberLiteral) {
-    const numberRange = getAstNodeTextRange(parserJsonNode);
+  if (isStringLiteral || isNumberLiteral || isNegativeNumberLiteral) {
+    const literalRange = getAstNodeTextRange(parserJsonNode);
+    const isLiteralValueValid =
+      (isStringLiteral && typeof jsonValue === 'string') ||
+      (!isStringLiteral && typeof jsonValue === 'number');
 
-    if (!numberRange || typeof jsonValue !== 'number') {
+    if (!literalRange || !isLiteralValueValid) {
       return undefined;
     }
-    return new JsonNumberLiteral(
-      sourceText.slice(numberRange.start, numberRange.end),
+    return new JsonSourceLiteral(
+      jsonValue,
+      sourceText.slice(literalRange.start, literalRange.end),
     );
   }
   if (parserJsonNode.type === 'ObjectExpression') {
@@ -117,11 +156,13 @@ function preserveJsonNumberLiterals(
 
     for (const propertyNode of parserJsonNode.properties) {
       const propertyName = getAstNodeName(propertyNode.key);
+      const propertyNameRange = getAstNodeTextRange(propertyNode.key);
       const propertyValueNode = propertyNode.value;
 
       if (
         propertyNode.type !== 'ObjectProperty' ||
         propertyName === null ||
+        !propertyNameRange ||
         propertyNames.has(propertyName) ||
         !Object.hasOwn(jsonValue, propertyName) ||
         !isParserJsonAstNode(propertyValueNode)
@@ -129,15 +170,22 @@ function preserveJsonNumberLiterals(
         return undefined;
       }
       propertyNames.add(propertyName);
-      const propertyValue = preserveJsonNumberLiterals(
+      const propertyPath = [...jsonPath, propertyName];
+      const propertyValue = preserveJsonSourceLiterals(
         jsonValue[propertyName]!,
         propertyValueNode,
         sourceText,
+        fieldNameSourceTexts,
+        propertyPath,
       );
 
       if (propertyValue === undefined) {
         return undefined;
       }
+      fieldNameSourceTexts.set(
+        getJsonPathKey(propertyPath),
+        sourceText.slice(propertyNameRange.start, propertyNameRange.end),
+      );
       jsonObject[propertyName] = propertyValue;
     }
     return jsonObject;
@@ -159,10 +207,12 @@ function preserveJsonNumberLiterals(
       if (!elementNode) {
         return undefined;
       }
-      const elementValue = preserveJsonNumberLiterals(
+      const elementValue = preserveJsonSourceLiterals(
         jsonValue[elementIndex]!,
         elementNode,
         sourceText,
+        fieldNameSourceTexts,
+        [...jsonPath, elementIndex],
       );
 
       if (elementValue === undefined) {
@@ -176,18 +226,26 @@ function preserveJsonNumberLiterals(
 }
 
 /** 生成供 Prettier JSON 打印器再次格式化的紧凑中间文本。 */
-function serializeJsonValue(jsonValue: JsonValue): string | null {
-  if (jsonValue instanceof JsonNumberLiteral) {
+function serializeJsonValue(
+  jsonValue: JsonValue,
+  fieldNameSourceTexts: ReadonlyMap<string, string>,
+  jsonPath: readonly JsonPathSegment[] = [],
+): string | null {
+  if (jsonValue instanceof JsonSourceLiteral) {
     return jsonValue.sourceText;
   }
-  if (typeof jsonValue === 'number') {
+  if (typeof jsonValue === 'number' || typeof jsonValue === 'string') {
     return null;
   }
   if (Array.isArray(jsonValue)) {
     const serializedValues: string[] = [];
 
-    for (const arrayValue of jsonValue) {
-      const serializedValue = serializeJsonValue(arrayValue);
+    for (const [arrayIndex, arrayValue] of jsonValue.entries()) {
+      const serializedValue = serializeJsonValue(
+        arrayValue,
+        fieldNameSourceTexts,
+        [...jsonPath, arrayIndex],
+      );
 
       if (serializedValue === null) {
         return null;
@@ -200,20 +258,43 @@ function serializeJsonValue(jsonValue: JsonValue): string | null {
     const serializedFields: string[] = [];
 
     for (const [fieldName, fieldValue] of Object.entries(jsonValue)) {
-      const serializedValue = serializeJsonValue(fieldValue);
+      const fieldPath = [...jsonPath, fieldName];
+      const fieldNameSourceText = fieldNameSourceTexts.get(
+        getJsonPathKey(fieldPath),
+      );
+      const serializedValue = serializeJsonValue(
+        fieldValue,
+        fieldNameSourceTexts,
+        fieldPath,
+      );
 
-      if (serializedValue === null) {
+      if (!fieldNameSourceText || serializedValue === null) {
         return null;
       }
-      serializedFields.push(`${JSON.stringify(fieldName)}:${serializedValue}`);
+      serializedFields.push(`${fieldNameSourceText}:${serializedValue}`);
     }
     return `{${serializedFields.join(',')}}`;
   }
   return JSON.stringify(jsonValue);
 }
 
-function isStringArray(value: JsonValue): value is string[] {
-  return Array.isArray(value) && value.every(item => typeof item === 'string');
+function isStringArray(value: JsonValue): value is JsonStringValue[] {
+  return Array.isArray(value) && value.every(isJsonStringValue);
+}
+
+function deduplicateStringValues(
+  stringValues: readonly JsonStringValue[],
+): JsonStringValue[] {
+  const uniqueStringValues = new Map<string, JsonStringValue>();
+
+  for (const stringValue of stringValues) {
+    const text = getJsonString(stringValue)!;
+
+    if (!uniqueStringValues.has(text)) {
+      uniqueStringValues.set(text, stringValue);
+    }
+  }
+  return [...uniqueStringValues.values()];
 }
 
 function sortJsonObject(
@@ -299,11 +380,15 @@ function sortUniqueStringArrayValue(fieldValue: JsonValue): JsonValue {
   if (!isStringArray(fieldValue)) {
     return fieldValue;
   }
-  return [...new Set(fieldValue)].sort(compareText);
+  return deduplicateStringValues(fieldValue).sort((leftValue, rightValue) =>
+    compareText(getJsonString(leftValue)!, getJsonString(rightValue)!),
+  );
 }
 
 function deduplicateStringArrayValue(fieldValue: JsonValue): JsonValue {
-  return isStringArray(fieldValue) ? [...new Set(fieldValue)] : fieldValue;
+  return isStringArray(fieldValue)
+    ? deduplicateStringValues(fieldValue)
+    : fieldValue;
 }
 
 function sortPersonValue(fieldValue: JsonValue): JsonValue {
@@ -350,21 +435,21 @@ function sortPackageJsonFields(packageJson: JsonObject): JsonObject {
 
 /** npm 与其他包管理器采用不同的依赖名称比较方式。 */
 function isNpmDependencyOrderPreferred(packageJson: JsonObject): boolean {
-  const packageManager = packageJson.packageManager;
+  const packageManager = getJsonString(packageJson.packageManager);
 
-  if (typeof packageManager === 'string') {
+  if (packageManager !== null) {
     return packageManager.startsWith('npm@');
   }
   const devEngines = packageJson.devEngines;
 
   if (isJsonObject(devEngines)) {
     const devPackageManager = devEngines.packageManager;
+    const devPackageManagerName = isJsonObject(devPackageManager)
+      ? getJsonString(devPackageManager.name)
+      : null;
 
-    if (
-      isJsonObject(devPackageManager) &&
-      typeof devPackageManager.name === 'string'
-    ) {
-      return devPackageManager.name === 'npm';
+    if (devPackageManagerName !== null) {
+      return devPackageManagerName === 'npm';
     }
   }
   if (isJsonObject(packageJson.pnpm)) {
@@ -554,12 +639,15 @@ function hasSequentialScript(packageJson: JsonObject): boolean {
 
     return (
       isJsonObject(scripts) &&
-      Object.values(scripts).some(
-        script =>
-          typeof script === 'string' &&
-          script.includes('*') &&
-          SEQUENTIAL_SCRIPT_PATTERN.test(script),
-      )
+      Object.values(scripts).some(script => {
+        const scriptText = getJsonString(script);
+
+        return (
+          scriptText !== null &&
+          scriptText.includes('*') &&
+          SEQUENTIAL_SCRIPT_PATTERN.test(scriptText)
+        );
+      })
     );
   });
 }
@@ -950,18 +1038,22 @@ export async function preprocessPackageJson(
     if (!isParserJsonAstNode(parserJsonAst)) {
       return sourceText;
     }
-    const packageJsonWithSourceNumbers = preserveJsonNumberLiterals(
+    const fieldNameSourceTexts = new Map<string, string>();
+    const packageJsonWithSourceLiterals = preserveJsonSourceLiterals(
       parsedPackageJson,
       parserJsonAst,
       sourceText,
+      fieldNameSourceTexts,
     );
 
-    if (!isJsonObject(packageJsonWithSourceNumbers)) {
+    if (!isJsonObject(packageJsonWithSourceLiterals)) {
       return sourceText;
     }
     return (
-      serializeJsonValue(sortPackageJsonObject(packageJsonWithSourceNumbers)) ??
-      sourceText
+      serializeJsonValue(
+        sortPackageJsonObject(packageJsonWithSourceLiterals),
+        fieldNameSourceTexts,
+      ) ?? sourceText
     );
   } catch {
     return sourceText;

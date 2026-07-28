@@ -350,6 +350,23 @@ describe('sort package.json', () => {
     expect(formattedText).toContain('"overflow": 1e400');
   });
 
+  test.each(['json', 'json-stringify'] as const)(
+    'preserves escaped strings and field names with the %s parser',
+    async parser => {
+      const sourceText = String.raw`{"version":"1.0.0","name":"p\u006bg","dependencies":{"z":"1","\u0061":"\u0031"},"path":"\/pkg"}`;
+      const formattedText = await formatPackageJsonWithSortPlugin(sourceText, {
+        parser,
+      });
+
+      expect(formattedText).toContain(String.raw`"name": "p\u006bg"`);
+      expect(formattedText).toContain(String.raw`"\u0061": "\u0031"`);
+      expect(formattedText).toContain(String.raw`"path": "\/pkg"`);
+      expect(formattedText.indexOf(String.raw`"\u0061"`)).toBeLessThan(
+        formattedText.indexOf('"z"'),
+      );
+    },
+  );
+
   test('does not collapse duplicate object fields', async () => {
     const sourceText =
       '{"scripts":{"test":"first","test":"last"},"name":"first","name":"last"}';
