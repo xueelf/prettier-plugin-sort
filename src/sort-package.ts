@@ -1,5 +1,6 @@
 import { type Parser, type ParserOptions } from 'prettier';
 import findMinimumSemanticVersion from 'semver/ranges/min-version.js';
+import getValidSemanticVersionRange from 'semver/ranges/valid.js';
 
 import { resolveSortOptions } from './options';
 import {
@@ -794,12 +795,63 @@ function getDependencyName(dependencyIdentifier: string): string {
     : dependencyIdentifier.slice(0, versionSeparatorIndex);
 }
 
-function parsePackageSelector(packageSelector: string): PackageSelector {
-  const [nameAndVersion = packageSelector] = packageSelector.split('>');
-  const versionSeparatorIndex = nameAndVersion.lastIndexOf('@');
+function getPackageVersionSeparatorIndex(packageSelector: string): number {
+  return packageSelector.indexOf('@', packageSelector.startsWith('@') ? 1 : 0);
+}
 
-  if (versionSeparatorIndex <= 0) {
-    return { name: packageSelector, versionRange: null };
+function isCompletePackageSelector(packageSelector: string): boolean {
+  const versionSeparatorIndex =
+    getPackageVersionSeparatorIndex(packageSelector);
+
+  if (versionSeparatorIndex < 0) {
+    return packageSelector !== '';
+  }
+  const name = packageSelector.slice(0, versionSeparatorIndex);
+  const versionRange = packageSelector.slice(versionSeparatorIndex + 1);
+
+  return (
+    name !== '' &&
+    versionRange.trim() !== '' &&
+    !versionRange.trimEnd().endsWith('||') &&
+    getValidSemanticVersionRange(versionRange) !== null
+  );
+}
+
+function findPnpmDependencySeparator(packageSelector: string): number {
+  for (
+    let separatorIndex = packageSelector.indexOf('>');
+    separatorIndex >= 0;
+    separatorIndex = packageSelector.indexOf('>', separatorIndex + 1)
+  ) {
+    const isSemverComparator =
+      packageSelector[separatorIndex - 1]?.trim() === '';
+
+    if (isSemverComparator) {
+      continue;
+    }
+    const parentSelector = packageSelector.slice(0, separatorIndex);
+    const dependencySelector = packageSelector.slice(separatorIndex + 1);
+
+    if (
+      dependencySelector.trim() !== '' &&
+      isCompletePackageSelector(parentSelector)
+    ) {
+      return separatorIndex;
+    }
+  }
+  return -1;
+}
+
+function parsePackageSelector(packageSelector: string): PackageSelector {
+  const dependencySeparatorIndex = findPnpmDependencySeparator(packageSelector);
+  const nameAndVersion =
+    dependencySeparatorIndex < 0
+      ? packageSelector
+      : packageSelector.slice(0, dependencySeparatorIndex);
+  const versionSeparatorIndex = getPackageVersionSeparatorIndex(nameAndVersion);
+
+  if (versionSeparatorIndex < 0) {
+    return { name: nameAndVersion, versionRange: null };
   }
   return {
     name: nameAndVersion.slice(0, versionSeparatorIndex),

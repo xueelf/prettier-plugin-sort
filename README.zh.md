@@ -136,6 +136,8 @@ import App from './App';
 
 默认值为 `separate`。包含默认导入或命名空间导入的仅类型 `import` 会保留原有形式。
 
+`import type { T }` 和 `import { type T }` 在 [`verbatimModuleSyntax`](https://www.typescriptlang.org/tsconfig/verbatimModuleSyntax.html) 下具有不同的运行时行为。仅当同一模块同时存在值导入时，插件才会在两种写法之间转换。否则保留原写法，避免改变模块的加载行为。
+
 ### 合并与排序边界
 
 启用 `esmImportMerge` 后，来自同一模块的 `import` 会在安全的情况下合并。

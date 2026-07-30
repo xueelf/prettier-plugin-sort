@@ -136,6 +136,8 @@ Set `esmImportSeparation` to `false` to remove blank lines between groups and ab
 
 `separate` is the default. Type-only default and namespace imports keep their original form.
 
+`import type { T }` and `import { type T }` have different runtime behavior under [`verbatimModuleSyntax`](https://www.typescriptlang.org/tsconfig/verbatimModuleSyntax.html). The plugin converts between them only when the same module also has a value import. Otherwise, it preserves the original form to avoid changing module loading behavior.
+
 ### Merging and sorting boundaries
 
 With `esmImportMerge` enabled, imports from the same module are merged when it is safe to do so.

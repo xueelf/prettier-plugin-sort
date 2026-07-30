@@ -663,28 +663,6 @@ function getLocalBindingNames(
   return localBindingNames;
 }
 
-function normalizeNamedTypeOnlyImport(
-  importDeclaration: ParsedImportDeclaration,
-): ParsedImportDeclaration {
-  if (
-    !importDeclaration.isTypeOnly ||
-    !importDeclaration.namedSpecifiers ||
-    importDeclaration.defaultBinding ||
-    importDeclaration.namespaceBinding ||
-    importDeclaration.verbatimDeclaration !== null
-  ) {
-    return importDeclaration;
-  }
-  return {
-    ...importDeclaration,
-    isTypeOnly: false,
-    namedSpecifiers: importDeclaration.namedSpecifiers.map(importSpecifier => ({
-      ...importSpecifier,
-      isTypeOnly: true,
-    })),
-  };
-}
-
 interface ImportBindingCounts {
   defaultBindingCount: number;
   namespaceBindingCount: number;
@@ -752,10 +730,12 @@ function mergeImportDeclarations(
   candidateImportDeclaration: ParsedImportDeclaration,
 ): ParsedImportDeclaration {
   let namedSpecifiers: ParsedImportSpecifier[] | null = null;
+  const isTypeOnly =
+    targetImportDeclaration.isTypeOnly && candidateImportDeclaration.isTypeOnly;
 
   const mergedNamedSpecifiers = [
-    ...(targetImportDeclaration.namedSpecifiers ?? []),
-    ...(candidateImportDeclaration.namedSpecifiers ?? []),
+    ...getNamedSpecifiersForMerge(targetImportDeclaration, isTypeOnly),
+    ...getNamedSpecifiersForMerge(candidateImportDeclaration, isTypeOnly),
   ];
 
   if (mergedNamedSpecifiers.length > 0) {
@@ -764,7 +744,7 @@ function mergeImportDeclarations(
   return {
     moduleSpecifier: targetImportDeclaration.moduleSpecifier,
     moduleSpecifierText: targetImportDeclaration.moduleSpecifierText,
-    isTypeOnly: false,
+    isTypeOnly,
     isSideEffectOnly: false,
     defaultBinding:
       targetImportDeclaration.defaultBinding ??
@@ -779,6 +759,18 @@ function mergeImportDeclarations(
     trailingCommentsText: '',
     isMergeBoundary: false,
   };
+}
+
+function getNamedSpecifiersForMerge(
+  importDeclaration: ParsedImportDeclaration,
+  isMergedTypeOnly: boolean,
+): ParsedImportSpecifier[] {
+  return (importDeclaration.namedSpecifiers ?? []).map(importSpecifier => ({
+    ...importSpecifier,
+    isTypeOnly:
+      !isMergedTypeOnly &&
+      (importDeclaration.isTypeOnly || importSpecifier.isTypeOnly),
+  }));
 }
 
 /**
@@ -826,13 +818,10 @@ function mergeCompatibleImports(
   }
   const mergedImportDeclarations: ParsedImportDeclaration[] = [];
 
-  for (const originalImportDeclaration of importDeclarations) {
-    const importDeclaration = normalizeNamedTypeOnlyImport(
-      originalImportDeclaration,
-    );
+  for (const importDeclaration of importDeclarations) {
     const importRequestKey = getImportRequestKey(importDeclaration);
     const bindingCounts = bindingCountsByImportDeclaration.get(
-      originalImportDeclaration,
+      importDeclaration,
     ) ?? {
       defaultBindingCount: 0,
       namespaceBindingCount: 0,
@@ -869,6 +858,7 @@ function mergeCompatibleImports(
 
 /**
  * 按配置转换 type import。
+ * 仅在保留运行时模块请求时转换声明形式。
  * 带注释或 import attributes 的声明不会被拆分，避免改变注释归属或模块请求。
  */
 function applyTypeImportStyle(
@@ -883,25 +873,30 @@ function applyTypeImportStyle(
   }
   const namedSpecifiers = importDeclaration.namedSpecifiers;
 
+  if (importDeclaration.isTypeOnly) {
+    return [
+      {
+        ...importDeclaration,
+        namedSpecifiers: sortNamedImportSpecifiers(namedSpecifiers),
+      },
+    ];
+  }
   if (typeImportStyle === 'separate') {
-    if (importDeclaration.isTypeOnly) {
-      return [
-        {
-          ...importDeclaration,
-          namedSpecifiers: sortNamedImportSpecifiers(namedSpecifiers),
-        },
-      ];
-    }
     const typeSpecifiers = namedSpecifiers.filter(
       importSpecifier => importSpecifier.isTypeOnly,
     );
     const valueSpecifiers = namedSpecifiers.filter(
       importSpecifier => !importSpecifier.isTypeOnly,
     );
+    const hasValueBinding =
+      valueSpecifiers.length > 0 ||
+      importDeclaration.defaultBinding !== null ||
+      importDeclaration.namespaceBinding !== null;
 
     if (
       typeSpecifiers.length > 0 &&
-      (importDeclaration.importAttributes !== null ||
+      (!hasValueBinding ||
+        importDeclaration.importAttributes !== null ||
         importDeclaration.leadingCommentsText.trim() !== '' ||
         importDeclaration.trailingCommentsText !== '')
     ) {
@@ -951,37 +946,19 @@ function applyTypeImportStyle(
     }
     return styledImportDeclarations;
   }
-  let inlineImportDeclaration = { ...importDeclaration, namedSpecifiers };
-
-  if (importDeclaration.isTypeOnly) {
-    inlineImportDeclaration = {
-      ...importDeclaration,
-      isTypeOnly: false,
-      namedSpecifiers: namedSpecifiers.map(importSpecifier => ({
-        ...importSpecifier,
-        isTypeOnly: true,
-      })),
-    };
-  }
   if (typeImportStyle === 'mixed') {
     return [
       {
-        ...inlineImportDeclaration,
-        namedSpecifiers: sortNamedImportSpecifiers(
-          inlineImportDeclaration.namedSpecifiers,
-        ),
+        ...importDeclaration,
+        namedSpecifiers: sortNamedImportSpecifiers(namedSpecifiers),
       },
     ];
   }
   const typeSpecifiers = sortNamedImportSpecifiers(
-    inlineImportDeclaration.namedSpecifiers.filter(
-      importSpecifier => importSpecifier.isTypeOnly,
-    ),
+    namedSpecifiers.filter(importSpecifier => importSpecifier.isTypeOnly),
   );
   const valueSpecifiers = sortNamedImportSpecifiers(
-    inlineImportDeclaration.namedSpecifiers.filter(
-      importSpecifier => !importSpecifier.isTypeOnly,
-    ),
+    namedSpecifiers.filter(importSpecifier => !importSpecifier.isTypeOnly),
   );
 
   let orderedSpecifiers = [...valueSpecifiers, ...typeSpecifiers];
@@ -989,7 +966,7 @@ function applyTypeImportStyle(
   if (typeImportStyle === 'inline-first') {
     orderedSpecifiers = [...typeSpecifiers, ...valueSpecifiers];
   }
-  return [{ ...inlineImportDeclaration, namedSpecifiers: orderedSpecifiers }];
+  return [{ ...importDeclaration, namedSpecifiers: orderedSpecifiers }];
 }
 
 function getImportBindingShapeRank(

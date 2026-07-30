@@ -261,8 +261,7 @@ describe('sort imports — edge cases', () => {
 
   test('no space between closing brace and from keyword is handled', async () => {
     const sourceText = "import {type FC}from 'react';\n";
-    // 默认配置会把 type import 拆成独立声明
-    const expectedText = "import type { FC } from 'react';\n";
+    const expectedText = "import { type FC } from 'react';\n";
 
     expect(await formatTypeScriptWithSortPlugin(sourceText)).toBe(expectedText);
   });

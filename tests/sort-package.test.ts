@@ -238,6 +238,71 @@ describe('sort package.json', () => {
     },
   );
 
+  test.each([
+    ['pkg@>10.0.0', 'pkg@^2.0.0', ['pkg@^2.0.0', 'pkg@>10.0.0']],
+    ['pkg@>=10 <20', 'pkg@^2.0.0', ['pkg@^2.0.0', 'pkg@>=10 <20']],
+    ['pkg@^1 || >10', 'pkg@^2', ['pkg@^1 || >10', 'pkg@^2']],
+    ['pkg@^20 || >1', 'pkg@^3', ['pkg@^20 || >1', 'pkg@^3']],
+    ['pkg@^1 >10', 'pkg@^3', ['pkg@^3', 'pkg@^1 >10']],
+  ] as const)(
+    'distinguishes the SemVer comparator in %s from a pnpm selector separator',
+    async (leftSelector, rightSelector, expectedSelectors) => {
+      const sourceText = JSON.stringify({
+        pnpm: {
+          overrides: {
+            [leftSelector]: 'left',
+            [rightSelector]: 'right',
+          },
+        },
+      });
+      const sortedPackageJson = JSON.parse(
+        await formatPackageJsonWithSortPlugin(sourceText),
+      );
+
+      expect(Object.keys(sortedPackageJson.pnpm.overrides)).toEqual([
+        ...expectedSelectors,
+      ]);
+    },
+  );
+
+  test.each([
+    ['parent@2>child', 'parent@1>child', ['parent@1>child', 'parent@2>child']],
+    [
+      'parent@>10>child',
+      'parent@^2>child',
+      ['parent@^2>child', 'parent@>10>child'],
+    ],
+    [
+      'parent@1>child@>10',
+      'parent>child@>10',
+      ['parent>child@>10', 'parent@1>child@>10'],
+    ],
+    [
+      '@scope/parent@>10>@scope/child',
+      '@scope/parent@^2>@scope/child',
+      ['@scope/parent@^2>@scope/child', '@scope/parent@>10>@scope/child'],
+    ],
+  ] as const)(
+    'sorts pnpm parent selectors in %s and %s',
+    async (leftSelector, rightSelector, expectedSelectors) => {
+      const sourceText = JSON.stringify({
+        pnpm: {
+          overrides: {
+            [leftSelector]: 'left',
+            [rightSelector]: 'right',
+          },
+        },
+      });
+      const sortedPackageJson = JSON.parse(
+        await formatPackageJsonWithSortPlugin(sourceText),
+      );
+
+      expect(Object.keys(sortedPackageJson.pnpm.overrides)).toEqual([
+        ...expectedSelectors,
+      ]);
+    },
+  );
+
   test('falls back to lexical ordering for invalid pnpm override ranges', async () => {
     const sourceText = JSON.stringify({
       pnpm: {

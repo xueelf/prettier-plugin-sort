@@ -52,6 +52,81 @@ describe('sort type imports', () => {
     expect(formattedText).toBe(sourceText);
   });
 
+  test.each(['inline-first', 'inline-last', 'mixed'] as const)(
+    '%s preserves a standalone declaration-level type import',
+    async esmImportTypeStyle => {
+      const sourceText = "import type { T } from './module';\n";
+
+      expect(
+        await formatTypeScriptWithSortPlugin(sourceText, {
+          esmImportTypeStyle,
+        }),
+      ).toBe(sourceText);
+    },
+  );
+
+  test.each(['inline-first', 'inline-last', 'mixed'] as const)(
+    '%s preserves declaration-level type imports when merging is disabled',
+    async esmImportTypeStyle => {
+      const sourceText = [
+        "import type { Type } from './module';",
+        "import { value } from './module';",
+        '',
+      ].join('\n');
+
+      expect(
+        await formatTypeScriptWithSortPlugin(sourceText, {
+          esmImportMerge: false,
+          esmImportTypeStyle,
+        }),
+      ).toBe(sourceText);
+    },
+  );
+
+  test.each(['inline-first', 'inline-last', 'mixed'] as const)(
+    '%s keeps merged declaration-level type imports type-only',
+    async esmImportTypeStyle => {
+      const sourceText = [
+        "import type { B } from './module';",
+        "import type { A } from './module';",
+        '',
+      ].join('\n');
+
+      expect(
+        await formatTypeScriptWithSortPlugin(sourceText, {
+          esmImportTypeStyle,
+        }),
+      ).toBe("import type { A, B } from './module';\n");
+    },
+  );
+
+  test.each([
+    ['inline-first', "import { type Type, value } from './module';\n"],
+    ['inline-last', "import { value, type Type } from './module';\n"],
+    ['mixed', "import { type Type, value } from './module';\n"],
+  ] as const)(
+    '%s safely merges declaration-level type and value imports',
+    async (esmImportTypeStyle, expectedText) => {
+      const sourceText = [
+        "import { value } from './module';",
+        "import type { Type } from './module';",
+        '',
+      ].join('\n');
+
+      expect(
+        await formatTypeScriptWithSortPlugin(sourceText, {
+          esmImportTypeStyle,
+        }),
+      ).toBe(expectedText);
+    },
+  );
+
+  test('separate preserves an inline-only import', async () => {
+    const sourceText = "import { type Type } from './module';\n";
+
+    expect(await formatTypeScriptWithSortPlugin(sourceText)).toBe(sourceText);
+  });
+
   test('inline-first: merges two imports from the same source into one', async () => {
     const sourceText = [
       "import Plugin from './dist/index.js';",
@@ -137,6 +212,26 @@ describe('sort type imports', () => {
 
     expect(await formatTypeScriptWithSortPlugin(sourceText)).toBe(sourceText);
   });
+
+  test.each([
+    "import type DefaultType from './module';",
+    "import type * as Namespace from './module';",
+  ])(
+    'does not merge `%s` with a value import in inline mode',
+    async typeImport => {
+      const sourceText = [
+        typeImport,
+        "import { value } from './module';",
+        '',
+      ].join('\n');
+
+      expect(
+        await formatTypeScriptWithSortPlugin(sourceText, {
+          esmImportTypeStyle: 'inline-first',
+        }),
+      ).toBe(sourceText);
+    },
+  );
 
   test('does not clobber `import type X` when merged with named type import', async () => {
     const sourceText = [

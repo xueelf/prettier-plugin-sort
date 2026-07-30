@@ -146,7 +146,7 @@ export const options: SupportOptions = {
     default: DEFAULT_SORT_OPTIONS.esmImportTypeStyle,
     category: 'ES Module Imports',
     description:
-      'Format named type imports as separate declarations or inline specifiers.',
+      'Format named type imports as separate declarations or inline specifiers without changing runtime module requests.',
     choices: [
       {
         value: 'separate',
