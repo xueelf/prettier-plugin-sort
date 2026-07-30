@@ -34,7 +34,8 @@
   ],
   "scripts": {
     "build": "bun run scripts/build.ts",
-    "format": "prettier \"**/*.{json,md,ts}\" --write --experimental-cli",
+    "format": "prettier \"**/*.{json,md,ts,yaml,yml}\" --write --experimental-cli",
+    "format:check": "prettier \"**/*.{json,md,ts,yaml,yml}\" --check --experimental-cli",
     "lint": "eslint --cache",
     "lint:fix": "eslint --fix --cache",
     "prepare": "husky",

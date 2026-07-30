@@ -32,5 +32,17 @@ jobs:
       - name: Build
         run: bun run build
 
+      - name: Check formatting
+        run: bun run format:check
+
+      - name: Lint
+        run: bun run lint
+
+      - name: Typecheck
+        run: bun run typecheck
+
+      - name: Test
+        run: bun run test
+
       - name: Publish
         run: npm publish --ignore-scripts
