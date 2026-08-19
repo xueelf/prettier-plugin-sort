@@ -41,15 +41,19 @@ describe('sort type imports', () => {
     expect(formattedText).toBe("import { a, type B, c, type D } from 'mod';\n");
   });
 
-  test('import type { … } is preserved on its own statement', async () => {
+  test('keeps a declaration-level type import separate while sorting its specifiers', async () => {
     const sourceText = [
-      "import type { B } from 'mod';",
+      "import type { B, A } from 'mod';",
       "import { a } from 'mod';",
       '',
     ].join('\n');
     const formattedText = await formatTypeScriptWithSortPlugin(sourceText);
 
-    expect(formattedText).toBe(sourceText);
+    expect(formattedText).toBe(
+      ["import type { A, B } from 'mod';", "import { a } from 'mod';", ''].join(
+        '\n',
+      ),
+    );
   });
 
   test.each(['inline-first', 'inline-last', 'mixed'] as const)(
@@ -140,32 +144,6 @@ describe('sort type imports', () => {
     expect(formattedText).toBe(
       "import Plugin, { type SortOptions } from './dist/index.js';\n",
     );
-  });
-
-  test('inline-last: merges two imports from the same source into one', async () => {
-    const sourceText = [
-      "import { a } from 'mod';",
-      "import { type B } from 'mod';",
-      '',
-    ].join('\n');
-    const formattedText = await formatTypeScriptWithSortPlugin(sourceText, {
-      esmImportTypeStyle: 'inline-last',
-    });
-
-    expect(formattedText).toBe("import { a, type B } from 'mod';\n");
-  });
-
-  test('mixed: merges two imports from the same source into one', async () => {
-    const sourceText = [
-      "import { c } from 'mod';",
-      "import type { A } from 'mod';",
-      '',
-    ].join('\n');
-    const formattedText = await formatTypeScriptWithSortPlugin(sourceText, {
-      esmImportTypeStyle: 'mixed',
-    });
-
-    expect(formattedText).toBe("import { type A, c } from 'mod';\n");
   });
 
   test('separate: keeps type and value imports from the same source separate', async () => {

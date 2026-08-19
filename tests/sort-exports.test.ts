@@ -4,7 +4,7 @@ import { formatTypeScriptWithSortPlugin } from './format-with-sort-plugin';
 
 describe('sort exports', () => {
   test('sorts named specifiers alphabetically', async () => {
-    const sourceText = 'export { a, b, c };\n';
+    const sourceText = 'export { c, a, b };\n';
     const formattedText = await formatTypeScriptWithSortPlugin(sourceText);
 
     expect(formattedText).toBe('export { a, b, c };\n');
@@ -17,15 +17,22 @@ describe('sort exports', () => {
     expect(formattedText).toBe("export { a, d } from 'mod';\n");
   });
 
+  test('sorts aliases by exported name', async () => {
+    const sourceText = 'export { a as z, z as a };\n';
+    const formattedText = await formatTypeScriptWithSortPlugin(sourceText);
+
+    expect(formattedText).toBe('export { z as a, a as z };\n');
+  });
+
   test('sorts type-only named exports', async () => {
-    const sourceText = 'export type { A, B };\n';
+    const sourceText = 'export type { B, A };\n';
     const formattedText = await formatTypeScriptWithSortPlugin(sourceText);
 
     expect(formattedText).toBe('export type { A, B };\n');
   });
 
   test('ignores type prefix when comparing inside mixed export list', async () => {
-    const sourceText = 'export { type A, b, c };\n';
+    const sourceText = 'export { c, type A, b };\n';
     const formattedText = await formatTypeScriptWithSortPlugin(sourceText);
 
     expect(formattedText).toBe('export { type A, b, c };\n');
@@ -44,12 +51,12 @@ describe('sort exports', () => {
   });
 
   test('esmExportSpecifierSort=false disables sorting', async () => {
-    const sourceText = 'export { a, b };\n';
+    const sourceText = 'export { b, a };\n';
     const formattedText = await formatTypeScriptWithSortPlugin(sourceText, {
       esmExportSpecifierSort: false,
     });
 
-    expect(formattedText).toBe('export { a, b };\n');
+    expect(formattedText).toBe(sourceText);
   });
 
   test('is idempotent: already-sorted export stays unchanged', async () => {
@@ -178,10 +185,8 @@ describe('sort exports', () => {
   test('finds a trailing prettier-ignore after unrelated earlier comments', async () => {
     const sourceText =
       '// earlier\nconst value = 1;\nexport { z,a }; // prettier-ignore\n';
-    const expectedText =
-      '// earlier\nconst value = 1;\nexport { z,a }; // prettier-ignore\n';
 
-    expect(await formatTypeScriptWithSortPlugin(sourceText)).toBe(expectedText);
+    expect(await formatTypeScriptWithSortPlugin(sourceText)).toBe(sourceText);
   });
 
   test.each([
@@ -192,12 +197,14 @@ describe('sort exports', () => {
     'espree',
     'flow',
     'meriyah',
-    'typescript',
-  ])('sorts export specifiers with the %s parser', async parserName => {
-    expect(
-      await formatTypeScriptWithSortPlugin("export { z, a } from 'mod';\n", {
-        parser: parserName,
-      }),
-    ).toBe("export { a, z } from 'mod';\n");
-  });
+  ])(
+    'sorts export specifiers with the non-default %s parser',
+    async parserName => {
+      expect(
+        await formatTypeScriptWithSortPlugin("export { z, a } from 'mod';\n", {
+          parser: parserName,
+        }),
+      ).toBe("export { a, z } from 'mod';\n");
+    },
+  );
 });
