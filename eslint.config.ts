@@ -8,6 +8,7 @@ export default defineConfig(
   tseslint.configs.recommended,
   {
     rules: {
+      curly: 'error',
       '@typescript-eslint/no-empty-object-type': [
         'error',
         { allowInterfaces: 'with-single-extends' },

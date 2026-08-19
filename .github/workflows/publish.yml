@@ -44,5 +44,8 @@ jobs:
       - name: Test
         run: bun run test
 
+      - name: Check version
+        run: bun run scripts/check-version.ts
+
       - name: Publish
         run: npm publish --ignore-scripts
