@@ -2,11 +2,12 @@ import { type Parser, type ParserOptions } from 'prettier';
 import findMinimumSemanticVersion from 'semver/ranges/min-version.js';
 import getValidSemanticVersionRange from 'semver/ranges/valid.js';
 
-import { resolveSortOptions } from './options';
+import { isPackageSortEnabled } from './options';
 import {
   type ParserAstNode,
   getAstNodeName,
   getAstNodeTextRange,
+  isParserAstNode,
 } from './parser-ast';
 import {
   DIRECTORY_FIELD_ORDER,
@@ -38,15 +39,6 @@ interface PackageSelector {
   versionRange: string | null;
 }
 
-interface ParserJsonAstNode extends ParserAstNode {
-  readonly argument?: ParserJsonAstNode;
-  readonly elements?: (ParserJsonAstNode | null)[];
-  readonly key?: ParserJsonAstNode;
-  readonly node?: ParserJsonAstNode;
-  readonly operator?: unknown;
-  readonly properties?: ParserJsonAstNode[];
-}
-
 type JsonKeyComparator = (leftKey: string, rightKey: string) => number;
 type PackageJsonFieldSorter = (
   fieldValue: JsonValue,
@@ -55,6 +47,10 @@ type PackageJsonFieldSorter = (
 
 const SEQUENTIAL_SCRIPT_PATTERN =
   /(?<=^|[\s&;<>|(])(?:run-s|npm-run-all2? .*(?:--sequential|--serial|-s))(?=$|[\s&;<>|)])/;
+
+const PACKAGE_JSON_FIELD_INDEXES = new Map<string, number>(
+  PACKAGE_JSON_FIELD_ORDER.map((fieldName, index) => [fieldName, index]),
+);
 
 function compareText(leftText: string, rightText: string): number {
   if (leftText === rightText) {
@@ -76,7 +72,7 @@ function getJsonPathKey(jsonPath: readonly JsonPathSegment[]): string {
   return JSON.stringify(jsonPath);
 }
 
-function getJsonString(jsonValue: JsonValue | undefined): string | null {
+function getJsonString(jsonValue?: JsonValue): string | null {
   if (typeof jsonValue === 'string') {
     return jsonValue;
   }
@@ -93,22 +89,13 @@ function isJsonStringValue(jsonValue: JsonValue): jsonValue is JsonStringValue {
   return getJsonString(jsonValue) !== null;
 }
 
-function isParserJsonAstNode(value: unknown): value is ParserJsonAstNode {
-  return (
-    typeof value === 'object' &&
-    value !== null &&
-    'type' in value &&
-    typeof value.type === 'string'
-  );
-}
-
 /**
  * 使用 parser AST 找回字符串、字段名和数字的源码范围。
  * JSON.parse 提供排序使用的值，序列化时恢复原始字面量。
  */
 function preserveJsonSourceLiterals(
   jsonValue: JsonValue,
-  parserJsonNode: ParserJsonAstNode,
+  parserJsonNode: ParserAstNode,
   sourceText: string,
   fieldNameSourceTexts: Map<string, string>,
   jsonPath: readonly JsonPathSegment[] = [],
@@ -116,7 +103,7 @@ function preserveJsonSourceLiterals(
   if (parserJsonNode.type === 'JsonRoot') {
     const rootNode = parserJsonNode.node;
 
-    if (!isParserJsonAstNode(rootNode)) {
+    if (!isParserAstNode(rootNode)) {
       return undefined;
     }
     return preserveJsonSourceLiterals(
@@ -166,7 +153,7 @@ function preserveJsonSourceLiterals(
         !propertyNameRange ||
         propertyNames.has(propertyName) ||
         !Object.hasOwn(jsonValue, propertyName) ||
-        !isParserJsonAstNode(propertyValueNode)
+        !isParserAstNode(propertyValueNode)
       ) {
         return undefined;
       }
@@ -405,13 +392,9 @@ function sortPeopleArrayValue(fieldValue: JsonValue): JsonValue {
 
 /** 已知字段遵循固定顺序，未知字段按名称排列，私有字段放在最后。 */
 function sortPackageJsonFields(packageJson: JsonObject): JsonObject {
-  const fieldOrderIndexes = new Map<string, number>(
-    PACKAGE_JSON_FIELD_ORDER.map((fieldName, index) => [fieldName, index]),
-  );
-
   return sortJsonObject(packageJson, (leftFieldName, rightFieldName) => {
-    const leftIndex = fieldOrderIndexes.get(leftFieldName);
-    const rightIndex = fieldOrderIndexes.get(rightFieldName);
+    const leftIndex = PACKAGE_JSON_FIELD_INDEXES.get(leftFieldName);
+    const rightIndex = PACKAGE_JSON_FIELD_INDEXES.get(rightFieldName);
     const isLeftFieldKnown = leftIndex !== undefined;
     const isRightFieldKnown = rightIndex !== undefined;
 
@@ -434,56 +417,18 @@ function sortPackageJsonFields(packageJson: JsonObject): JsonObject {
   });
 }
 
-/** npm 与其他包管理器采用不同的依赖名称比较方式。 */
-function isNpmDependencyOrderPreferred(packageJson: JsonObject): boolean {
-  const packageManager = getJsonString(packageJson.packageManager);
-
-  if (packageManager !== null) {
-    return packageManager.startsWith('npm@');
-  }
-  const devEngines = packageJson.devEngines;
-
-  if (isJsonObject(devEngines)) {
-    const devPackageManager = devEngines.packageManager;
-    const devPackageManagerName = isJsonObject(devPackageManager)
-      ? getJsonString(devPackageManager.name)
-      : null;
-
-    if (devPackageManagerName !== null) {
-      return devPackageManagerName === 'npm';
-    }
-  }
-  if (isJsonObject(packageJson.pnpm)) {
-    return false;
-  }
-  return true;
-}
-
-function sortDependencyObject(
-  dependencyObject: JsonObject,
-  packageJson: JsonObject,
-): JsonObject {
-  if (!isNpmDependencyOrderPreferred(packageJson)) {
-    return sortJsonObject(dependencyObject);
-  }
+/** 依赖名称始终按 npm 的英文区域规则排列。 */
+function sortDependencyObject(dependencyObject: JsonObject): JsonObject {
   return sortJsonObject(dependencyObject, (leftName, rightName) =>
     leftName.localeCompare(rightName, 'en'),
   );
 }
 
-function sortDependencyValue(
-  fieldValue: JsonValue,
-  packageJson: JsonObject,
-): JsonValue {
-  return sortJsonObjectValue(fieldValue, dependencyObject =>
-    sortDependencyObject(dependencyObject, packageJson),
-  );
+function sortDependencyValue(fieldValue: JsonValue): JsonValue {
+  return sortJsonObjectValue(fieldValue, sortDependencyObject);
 }
 
-function sortWorkspacesValue(
-  fieldValue: JsonValue,
-  packageJson: JsonObject,
-): JsonValue {
+function sortWorkspacesValue(fieldValue: JsonValue): JsonValue {
   if (!isJsonObject(fieldValue)) {
     return fieldValue;
   }
@@ -497,10 +442,7 @@ function sortWorkspacesValue(
     sortedWorkspaces.packages = sortUniqueStringArrayValue(workspacePackages);
   }
   if (isJsonObject(sortedWorkspaces.catalog)) {
-    sortedWorkspaces.catalog = sortDependencyObject(
-      sortedWorkspaces.catalog,
-      packageJson,
-    );
+    sortedWorkspaces.catalog = sortDependencyObject(sortedWorkspaces.catalog);
   }
   return sortedWorkspaces;
 }
@@ -1057,7 +999,7 @@ function sortPackageJsonObject(packageJson: JsonObject): JsonObject {
   );
 }
 
-function isPackageJsonFile(filePath: string | undefined): boolean {
+function isPackageJsonFile(filePath?: string): boolean {
   return filePath?.split(/[\\/]/).at(-1) === 'package.json';
 }
 
@@ -1072,7 +1014,7 @@ export async function preprocessPackageJson(
 ): Promise<string> {
   if (
     !isPackageJsonFile(prettierOptions.filepath) ||
-    !resolveSortOptions(prettierOptions).packageSort
+    !isPackageSortEnabled(prettierOptions)
   ) {
     return sourceText;
   }
@@ -1087,7 +1029,7 @@ export async function preprocessPackageJson(
       prettierOptions,
     );
 
-    if (!isParserJsonAstNode(parserJsonAst)) {
+    if (!isParserAstNode(parserJsonAst)) {
       return sourceText;
     }
     const fieldNameSourceTexts = new Map<string, string>();

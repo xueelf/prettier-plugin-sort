@@ -24,6 +24,7 @@ interface ParserAstLocation extends Record<string, unknown> {
  * - `declaration`、`specifiers`、`source`、`imported`、`local`、`exported` 来自 ESTree ES2015 module 节点
  * - `program`、`comments` 来自 Babel `File` 包装节点及 Prettier 的顶层注释约定
  * - `importKind`、`phase` 来自 Babel/typescript-estree 的 import 扩展
+ * - `argument`、`elements`、`key`、`node`、`operator`、`properties` 来自 Babel JSON AST
  *
  * 不同 parser 的字段结构存在差异，因此属性均为可选，并在使用处收窄类型。
  *
@@ -38,9 +39,15 @@ export interface ParserAstNode extends ParserAstLocation {
   readonly type: string;
   readonly name?: unknown;
   readonly value?: unknown;
+  readonly argument?: ParserAstNode;
   readonly body?: ParserAstNode[];
   readonly comments?: ParserAstComment[];
+  readonly elements?: (ParserAstNode | null)[];
+  readonly key?: ParserAstNode;
+  readonly node?: ParserAstNode;
+  readonly operator?: unknown;
   readonly program?: ParserAstNode;
+  readonly properties?: ParserAstNode[];
   readonly declaration?: ParserAstNode | null;
   readonly specifiers?: ParserAstNode[];
   readonly source?: ParserAstNode | null;
@@ -67,8 +74,17 @@ export interface ParserAstCommentWithTextRange {
   readonly textRange: SourceTextRange;
 }
 
+export function isParserAstNode(value: unknown): value is ParserAstNode {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    'type' in value &&
+    typeof value.type === 'string'
+  );
+}
+
 export function getAstNodeTextRange(
-  node: ParserAstNode | ParserAstComment | undefined | null,
+  node?: ParserAstNode | ParserAstComment | null,
 ): SourceTextRange | null {
   if (!node) {
     return null;
@@ -120,9 +136,7 @@ export function findCommentIndexAtOrAfter(
   return searchStartIndex;
 }
 
-export function getAstNodeName(
-  node: ParserAstNode | undefined | null,
-): string | null {
+export function getAstNodeName(node?: ParserAstNode | null): string | null {
   if (!node) {
     return null;
   }

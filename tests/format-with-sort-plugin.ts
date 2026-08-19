@@ -23,7 +23,19 @@ export function formatPackageJsonWithSortPlugin(
   return prettier.format(sourceText, {
     plugins: [sortPlugin],
     parser: 'json-stringify',
-    filepath: '/tmp/package.json',
+    filepath: 'package.json',
+    ...prettierOptions,
+  });
+}
+
+export function formatTsconfigWithSortPlugin(
+  sourceText: string,
+  prettierOptions: SortPluginFormatOptions = {},
+): Promise<string> {
+  return prettier.format(sourceText, {
+    plugins: [sortPlugin],
+    parser: 'json',
+    filepath: 'tsconfig.json',
     ...prettierOptions,
   });
 }

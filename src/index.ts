@@ -7,6 +7,7 @@ import typescriptPlugin from 'prettier/plugins/typescript';
 
 import { options } from './options';
 import { preprocessPackageJson } from './sort-package';
+import { preprocessTsconfig } from './sort-tsconfig';
 import { sortTypeScript } from './sort-typescript';
 
 type ParserPreprocessTransform = (
@@ -33,6 +34,20 @@ function wrapParserPreprocess(
   };
 }
 
+async function preprocessJson(
+  sourceText: string,
+  prettierOptions: ParserOptions,
+  parser: Parser,
+): Promise<string> {
+  const sortedPackageJson = await preprocessPackageJson(
+    sourceText,
+    prettierOptions,
+    parser,
+  );
+
+  return preprocessTsconfig(sortedPackageJson, prettierOptions, parser);
+}
+
 const sortPlugin: Plugin = {
   options,
   parsers: {
@@ -48,7 +63,7 @@ const sortPlugin: Plugin = {
     ),
     espree: wrapParserPreprocess(acornPlugin.parsers.espree, sortTypeScript),
     flow: wrapParserPreprocess(flowPlugin.parsers.flow, sortTypeScript),
-    json: wrapParserPreprocess(babelPlugin.parsers.json, preprocessPackageJson),
+    json: wrapParserPreprocess(babelPlugin.parsers.json, preprocessJson),
     'json-stringify': wrapParserPreprocess(
       babelPlugin.parsers['json-stringify'],
       preprocessPackageJson,

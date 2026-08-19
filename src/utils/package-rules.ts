@@ -1,5 +1,6 @@
 /**
  * 基于 `sort-package-json` 4.0.0 默认规则的 `package.json` 顶层字段顺序。
+ * `$schema` 按 JSON Schema 惯例补充在最前。
  *
  * @see {@link https://github.com/keithamus/sort-package-json/blob/v4.0.0/defaultRules.md | sort-package-json 4.0.0 默认规则}
  */

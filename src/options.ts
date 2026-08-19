@@ -17,17 +17,46 @@ export interface SortOptions {
   esmImportMerge?: boolean;
   esmExportSpecifierSort?: boolean;
   packageSort?: boolean;
+  tsconfigSort?: boolean;
+  tsconfigSeparation?: boolean;
 }
+
+/** ES module 排序所需的完整配置。 */
+export type ResolvedEsmOptions = Required<
+  Pick<
+    SortOptions,
+    | 'esmExportSpecifierSort'
+    | 'esmImportGroups'
+    | 'esmImportMerge'
+    | 'esmImportSeparation'
+    | 'esmImportSort'
+    | 'esmImportTypeStyle'
+  >
+>;
+
+/** tsconfig.json 排序所需的完整配置。 */
+export type ResolvedTsconfigOptions = Required<
+  Pick<SortOptions, 'tsconfigSeparation' | 'tsconfigSort'>
+>;
 
 /** 默认排序配置。 */
 const DEFAULT_SORT_OPTIONS: Required<SortOptions> = {
   esmImportSort: true,
-  esmImportGroups: ['builtin', 'external', 'parent', 'sibling', 'index'],
+  esmImportGroups: [
+    'builtin',
+    'external',
+    'internal',
+    'parent',
+    'sibling',
+    'index',
+  ],
   esmImportSeparation: true,
   esmImportTypeStyle: 'separate',
   esmImportMerge: true,
   esmExportSpecifierSort: true,
   packageSort: true,
+  tsconfigSort: true,
+  tsconfigSeparation: true,
 };
 
 /** 有效的 import 分组值。 */
@@ -77,12 +106,10 @@ function resolveBooleanSortOption(
   return DEFAULT_SORT_OPTIONS[optionName];
 }
 
-/**
- * 从 Prettier 选项中提取插件配置，缺失或非法的参数会回退为默认值。
- */
-export function resolveSortOptions(
+/** 从 Prettier 选项中提取 ES module 配置。 */
+export function resolveEsmOptions(
   prettierOptions: SortPluginParserOptions,
-): Required<SortOptions> {
+): ResolvedEsmOptions {
   const configuredImportGroups = Array.isArray(prettierOptions.esmImportGroups)
     ? [...new Set(prettierOptions.esmImportGroups.filter(isValidImportGroup))]
     : [];
@@ -113,12 +140,31 @@ export function resolveSortOptions(
       prettierOptions,
       'esmExportSpecifierSort',
     ),
-    packageSort: resolveBooleanSortOption(prettierOptions, 'packageSort'),
+  };
+}
+
+/** 从 Prettier 选项中提取 package.json 配置。 */
+export function isPackageSortEnabled(
+  prettierOptions: SortPluginParserOptions,
+): boolean {
+  return resolveBooleanSortOption(prettierOptions, 'packageSort');
+}
+
+/** 从 Prettier 选项中提取 tsconfig.json 配置。 */
+export function resolveTsconfigOptions(
+  prettierOptions: SortPluginParserOptions,
+): ResolvedTsconfigOptions {
+  return {
+    tsconfigSort: resolveBooleanSortOption(prettierOptions, 'tsconfigSort'),
+    tsconfigSeparation: resolveBooleanSortOption(
+      prettierOptions,
+      'tsconfigSeparation',
+    ),
   };
 }
 
 /** Prettier 插件选项。 */
-export const options: SupportOptions = {
+export const options = {
   esmImportSort: {
     type: 'boolean',
     default: DEFAULT_SORT_OPTIONS.esmImportSort,
@@ -184,7 +230,19 @@ export const options: SupportOptions = {
     type: 'boolean',
     default: DEFAULT_SORT_OPTIONS.packageSort,
     category: 'package.json',
-    description:
-      'Sort package.json fields using the sort-package-json community convention.',
+    description: 'Sort fields in package.json.',
   },
-};
+  tsconfigSort: {
+    type: 'boolean',
+    default: DEFAULT_SORT_OPTIONS.tsconfigSort,
+    category: 'tsconfig.json',
+    description: 'Sort fields in tsconfig.json.',
+  },
+  tsconfigSeparation: {
+    type: 'boolean',
+    default: DEFAULT_SORT_OPTIONS.tsconfigSeparation,
+    category: 'tsconfig.json',
+    description:
+      'Add blank lines between TypeScript 5.8 compilerOptions categories.',
+  },
+} satisfies Record<keyof SortOptions, SupportOptions[string]>;

@@ -1,7 +1,7 @@
 {
   "name": "prettier-plugin-sort",
   "version": "1.0.1",
-  "description": "A Prettier plugin for sorting ES module imports, export specifiers, and package.json keys.",
+  "description": "A Prettier plugin for sorting ES module imports, export specifiers, and fields in package.json and tsconfig.json.",
   "keywords": [
     "imports",
     "order",
@@ -10,7 +10,8 @@
     "plugin",
     "prettier",
     "prettier-plugin",
-    "sort"
+    "sort",
+    "tsconfig"
   ],
   "homepage": "https://github.com/xueelf/prettier-plugin-sort",
   "bugs": {
@@ -43,6 +44,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "get-tsconfig": "^4.14.0",
     "semver": "^7.8.5"
   },
   "devDependencies": {

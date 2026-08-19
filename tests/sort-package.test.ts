@@ -2,6 +2,12 @@ import { describe, expect, test } from 'bun:test';
 
 import { formatPackageJsonWithSortPlugin } from './format-with-sort-plugin';
 
+async function sortPackageJson<T>(packageJson: T): Promise<T> {
+  return JSON.parse(
+    await formatPackageJsonWithSortPlugin(JSON.stringify(packageJson)),
+  ) as T;
+}
+
 describe('sort package.json', () => {
   test('follows the canonical top-level and nested field order', async () => {
     const sourceText = JSON.stringify(
@@ -24,6 +30,7 @@ describe('sort package.json', () => {
         },
         dependencies: { zod: '1', axios: '1' },
         zUnknown: true,
+        $schema: 'https://json.schemastore.org/package.json',
         aUnknown: true,
       },
       null,
@@ -34,6 +41,7 @@ describe('sort package.json', () => {
     );
 
     expect(Object.keys(sortedPackageJson)).toEqual([
+      '$schema',
       'name',
       'version',
       'keywords',
@@ -63,27 +71,63 @@ describe('sort package.json', () => {
     ]);
   });
 
-  test('applies the documented nested field rules', async () => {
+  test('always sorts dependencies like npm', async () => {
     const sourceText = JSON.stringify({
-      pnpm: {
-        packageExtensions: {
-          z: { dependencies: { z: '1', a: '1' } },
-          a: {},
-        },
-        overrides: { z: '1', a: '1' },
-        neverBuiltDependencies: ['z', 'a'],
+      packageManager: 'pnpm@10.0.0',
+      dependencies: { 'a-b': '1', a_b: '1' },
+    });
+    const sortedPackageJson = JSON.parse(
+      await formatPackageJsonWithSortPlugin(sourceText),
+    );
+
+    expect(Object.keys(sortedPackageJson.dependencies)).toEqual(['a_b', 'a-b']);
+  });
+
+  test('sorts nested package metadata', async () => {
+    const sortedPackageJson = await sortPackageJson({
+      workspaces: {
+        catalog: { z: '1', a: '1' },
+        packages: ['z', 'a', 'z'],
       },
-      engineStrict: { z: true, a: true },
-      resolutions: { Z: '1', a: '1' },
+      directories: { test: 'test', bin: 'bin', lib: 'lib' },
+      contributors: [{ url: 'url', email: 'email', name: 'name' }],
+      author: { url: 'url', email: 'email', name: 'name' },
+      bugs: { email: 'email', url: 'url' },
+    });
+
+    expect(Object.keys(sortedPackageJson.bugs)).toEqual(['url', 'email']);
+    expect(Object.keys(sortedPackageJson.author)).toEqual([
+      'name',
+      'email',
+      'url',
+    ]);
+    expect(Object.keys(sortedPackageJson.contributors[0]!)).toEqual([
+      'name',
+      'email',
+      'url',
+    ]);
+    expect(Object.keys(sortedPackageJson.directories)).toEqual([
+      'lib',
+      'bin',
+      'test',
+    ]);
+    expect(Object.keys(sortedPackageJson.workspaces)).toEqual([
+      'packages',
+      'catalog',
+    ]);
+    expect(sortedPackageJson.workspaces.packages).toEqual(['a', 'z']);
+    expect(Object.keys(sortedPackageJson.workspaces.catalog)).toEqual([
+      'a',
+      'z',
+    ]);
+  });
+
+  test('sorts nested tool configurations', async () => {
+    const sortedPackageJson = await sortPackageJson({
       devEngines: {
         packageManager: { onFail: 'warn', version: '1', name: 'bun' },
       },
       volta: { yarn: '1', npm: '1', node: '1' },
-      dependenciesMeta: {
-        'pkg@2': { z: true, a: true },
-        'pkg@1': {},
-        a: {},
-      },
       eslintConfig: {
         globals: { z: true, a: true },
         rules: { 'plugin/z': 'error', z: 'error', a: 'error' },
@@ -98,42 +142,9 @@ describe('sort package.json', () => {
         'pre-push': 'push',
         'pre-commit': 'commit',
       },
-      workspaces: {
-        catalog: { z: '1', a: '1' },
-        packages: ['z', 'a', 'z'],
-      },
-      directories: { test: 'test', bin: 'bin', lib: 'lib' },
-      contributors: [{ url: 'url', email: 'email', name: 'name' }],
-      author: { url: 'url', email: 'email', name: 'name' },
-      bugs: { email: 'email', url: 'url' },
-      version: '1.0.0',
-      name: 'pkg',
     });
-    const sortedPackageJson = JSON.parse(
-      await formatPackageJsonWithSortPlugin(sourceText),
-    );
+    const prettierOverride = sortedPackageJson.prettier.overrides[0]!;
 
-    expect(Object.keys(sortedPackageJson.bugs)).toEqual(['url', 'email']);
-    expect(Object.keys(sortedPackageJson.author)).toEqual([
-      'name',
-      'email',
-      'url',
-    ]);
-    expect(Object.keys(sortedPackageJson.contributors[0])).toEqual([
-      'name',
-      'email',
-      'url',
-    ]);
-    expect(Object.keys(sortedPackageJson.directories)).toEqual([
-      'lib',
-      'bin',
-      'test',
-    ]);
-    expect(sortedPackageJson.workspaces.packages).toEqual(['a', 'z']);
-    expect(Object.keys(sortedPackageJson.workspaces.catalog)).toEqual([
-      'a',
-      'z',
-    ]);
     expect(Object.keys(sortedPackageJson['simple-git-hooks'])).toEqual([
       'pre-commit',
       'pre-push',
@@ -143,9 +154,8 @@ describe('sort package.json', () => {
       'z',
       'overrides',
     ]);
-    expect(
-      Object.keys(sortedPackageJson.prettier.overrides[0].options),
-    ).toEqual(['a', 'z']);
+    expect(Object.keys(prettierOverride)).toEqual(['files', 'options', 'z']);
+    expect(Object.keys(prettierOverride.options)).toEqual(['a', 'z']);
     expect(Object.keys(sortedPackageJson.eslintConfig)).toEqual([
       'parser',
       'rules',
@@ -156,11 +166,41 @@ describe('sort package.json', () => {
       'z',
       'plugin/z',
     ]);
+    expect(Object.keys(sortedPackageJson.eslintConfig.globals)).toEqual([
+      'a',
+      'z',
+    ]);
+    expect(Object.keys(sortedPackageJson.devEngines.packageManager)).toEqual([
+      'name',
+      'version',
+      'onFail',
+    ]);
     expect(Object.keys(sortedPackageJson.volta)).toEqual([
       'node',
       'npm',
       'yarn',
     ]);
+  });
+
+  test('sorts nested dependency configurations', async () => {
+    const sortedPackageJson = await sortPackageJson({
+      pnpm: {
+        packageExtensions: {
+          z: { dependencies: { z: '1', a: '1' } },
+          a: {},
+        },
+        overrides: { z: '1', a: '1' },
+        neverBuiltDependencies: ['z', 'a'],
+      },
+      engineStrict: { z: true, a: true },
+      resolutions: { Z: '1', a: '1' },
+      dependenciesMeta: {
+        'pkg@2': { z: true, a: true },
+        'pkg@1': {},
+        a: {},
+      },
+    });
+
     expect(Object.keys(sortedPackageJson.resolutions)).toEqual(['Z', 'a']);
     expect(Object.keys(sortedPackageJson.engineStrict)).toEqual(['a', 'z']);
     expect(Object.keys(sortedPackageJson.dependenciesMeta)).toEqual([
@@ -172,16 +212,19 @@ describe('sort package.json', () => {
       'a',
       'z',
     ]);
-    expect(Object.keys(sortedPackageJson.devEngines.packageManager)).toEqual([
-      'name',
-      'version',
-      'onFail',
-    ]);
     expect(Object.keys(sortedPackageJson.pnpm)).toEqual([
       'neverBuiltDependencies',
       'overrides',
       'packageExtensions',
     ]);
+    expect(Object.keys(sortedPackageJson.pnpm.overrides)).toEqual(['a', 'z']);
+    expect(Object.keys(sortedPackageJson.pnpm.packageExtensions)).toEqual([
+      'a',
+      'z',
+    ]);
+    expect(
+      Object.keys(sortedPackageJson.pnpm.packageExtensions.z.dependencies),
+    ).toEqual(['a', 'z']);
   });
 
   test('sorts versioned pnpm override selectors by minimum SemVer', async () => {
@@ -239,20 +282,21 @@ describe('sort package.json', () => {
   );
 
   test.each([
-    ['pkg@>10.0.0', 'pkg@^2.0.0', ['pkg@^2.0.0', 'pkg@>10.0.0']],
-    ['pkg@>=10 <20', 'pkg@^2.0.0', ['pkg@^2.0.0', 'pkg@>=10 <20']],
-    ['pkg@^1 || >10', 'pkg@^2', ['pkg@^1 || >10', 'pkg@^2']],
-    ['pkg@^20 || >1', 'pkg@^3', ['pkg@^20 || >1', 'pkg@^3']],
-    ['pkg@^1 >10', 'pkg@^3', ['pkg@^3', 'pkg@^1 >10']],
+    ['pkg@>10.0.0', ['pkg@^2.0.0', 'pkg@>10.0.0']],
+    ['pkg@>=10 <20', ['pkg@^2.0.0', 'pkg@>=10 <20']],
+    ['pkg@^1 || >10', ['pkg@^1 || >10', 'pkg@^2']],
+    ['pkg@^20 || >1', ['pkg@^20 || >1', 'pkg@^3']],
+    ['pkg@^1 >10', ['pkg@^3', 'pkg@^1 >10']],
   ] as const)(
     'distinguishes the SemVer comparator in %s from a pnpm selector separator',
-    async (leftSelector, rightSelector, expectedSelectors) => {
+    async (_selector, expectedSelectors) => {
       const sourceText = JSON.stringify({
         pnpm: {
-          overrides: {
-            [leftSelector]: 'left',
-            [rightSelector]: 'right',
-          },
+          overrides: Object.fromEntries(
+            [...expectedSelectors]
+              .reverse()
+              .map(selector => [selector, selector]),
+          ),
         },
       });
       const sortedPackageJson = JSON.parse(
@@ -326,9 +370,9 @@ describe('sort package.json', () => {
     const sourceText = JSON.stringify({
       pnpm: {
         overrides: {
-          'pkg@^2.0.0': '2',
-          'pkg@^10.0.0': '10',
           'pkg@^15.invalid': 'invalid',
+          'pkg@^10.0.0': '10',
+          'pkg@^2.0.0': '2',
         },
       },
     });
@@ -376,7 +420,7 @@ describe('sort package.json', () => {
     expect(
       await formatPackageJsonWithSortPlugin(sourceText, {
         parser: 'json',
-        filepath: '/tmp/settings.json',
+        filepath: 'settings.json',
       }),
     ).toBe(sourceText);
   });
@@ -409,10 +453,9 @@ describe('sort package.json', () => {
       '{"unsafe":9007199254740993,"negativeZero":-0,"overflow":1e400,"name":"pkg"}';
     const formattedText = await formatPackageJsonWithSortPlugin(sourceText);
 
-    expect(formattedText).toContain('"name": "pkg"');
-    expect(formattedText).toContain('"unsafe": 9007199254740993');
-    expect(formattedText).toContain('"negativeZero": -0');
-    expect(formattedText).toContain('"overflow": 1e400');
+    expect(formattedText).toBe(
+      '{\n  "name": "pkg",\n  "negativeZero": -0,\n  "overflow": 1e400,\n  "unsafe": 9007199254740993\n}\n',
+    );
   });
 
   test.each(['json', 'json-stringify'] as const)(
@@ -432,14 +475,25 @@ describe('sort package.json', () => {
     },
   );
 
-  test('does not collapse duplicate object fields', async () => {
-    const sourceText =
-      '{"scripts":{"test":"first","test":"last"},"name":"first","name":"last"}';
-    const formattedText = await formatPackageJsonWithSortPlugin(sourceText);
-
-    expect(formattedText.match(/"name"/g)).toHaveLength(2);
-    expect(formattedText.match(/"test"/g)).toHaveLength(2);
-  });
+  test.each([
+    [
+      'root',
+      '{"version":"1.0.0","name":"first","name":"last"}',
+      '{\n  "version": "1.0.0",\n  "name": "first",\n  "name": "last"\n}\n',
+    ],
+    [
+      'nested',
+      '{"scripts":{"test":"first","test":"last"},"version":"1.0.0","name":"pkg"}',
+      '{\n  "scripts": {\n    "test": "first",\n    "test": "last"\n  },\n  "version": "1.0.0",\n  "name": "pkg"\n}\n',
+    ],
+  ])(
+    'returns the original field order when %s object fields are duplicated',
+    async (_location, sourceText, expectedText) => {
+      expect(await formatPackageJsonWithSortPlugin(sourceText)).toBe(
+        expectedText,
+      );
+    },
+  );
 
   test.each([
     'toString',
@@ -470,7 +524,14 @@ describe('sort package.json', () => {
       dependencies: { b: '1', a: '2' },
     });
     const firstPassText = await formatPackageJsonWithSortPlugin(sourceText);
+    const firstPassPackageJson = JSON.parse(firstPassText);
 
+    expect(Object.keys(firstPassPackageJson)).toEqual([
+      'name',
+      'version',
+      'dependencies',
+    ]);
+    expect(Object.keys(firstPassPackageJson.dependencies)).toEqual(['a', 'b']);
     expect(await formatPackageJsonWithSortPlugin(firstPassText)).toBe(
       firstPassText,
     );

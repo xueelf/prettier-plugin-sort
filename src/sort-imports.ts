@@ -1,6 +1,6 @@
 import {
   type ImportGroup,
-  type SortOptions,
+  type ResolvedEsmOptions,
   type TypeImportStyle,
 } from './options';
 import {
@@ -175,7 +175,35 @@ function getPrettierFilePragmaComment(
   );
 }
 
-function classifyImportGroup(moduleSpecifier: string): ImportGroup {
+function matchesInternalPattern(
+  moduleSpecifier: string,
+  internalPattern: string,
+): boolean {
+  const wildcardIndex = internalPattern.indexOf('*');
+
+  if (wildcardIndex < 0) {
+    return moduleSpecifier === internalPattern;
+  }
+  if (
+    internalPattern === '*' ||
+    wildcardIndex !== internalPattern.lastIndexOf('*')
+  ) {
+    return false;
+  }
+  const prefix = internalPattern.slice(0, wildcardIndex);
+  const suffix = internalPattern.slice(wildcardIndex + 1);
+
+  return (
+    moduleSpecifier.length >= prefix.length + suffix.length &&
+    moduleSpecifier.startsWith(prefix) &&
+    moduleSpecifier.endsWith(suffix)
+  );
+}
+
+function classifyImportGroup(
+  moduleSpecifier: string,
+  internalPatterns: readonly string[],
+): ImportGroup {
   if (
     moduleSpecifier === 'bun' ||
     moduleSpecifier.startsWith('bun:') ||
@@ -197,10 +225,9 @@ function classifyImportGroup(moduleSpecifier: string): ImportGroup {
     return 'sibling';
   }
   if (
-    moduleSpecifier.startsWith('/') ||
-    moduleSpecifier.startsWith('~') ||
-    moduleSpecifier.startsWith('@/') ||
-    moduleSpecifier.startsWith('#')
+    internalPatterns.some(internalPattern =>
+      matchesInternalPattern(moduleSpecifier, internalPattern),
+    )
   ) {
     return 'internal';
   }
@@ -983,7 +1010,8 @@ function getImportBindingShapeRank(
 
 function sortImportSegment(
   importDeclarations: readonly ParsedImportDeclaration[],
-  sortOptions: Required<SortOptions>,
+  sortOptions: ResolvedEsmOptions,
+  internalPatterns: readonly string[],
   importGroupOrder: ReadonlyMap<ImportGroup, number>,
 ): string[] {
   let mergedImportDeclarations = [...importDeclarations];
@@ -999,7 +1027,10 @@ function sortImportSegment(
   const rankedImportDeclarations = styledImportDeclarations.map(
     (importDeclaration, originalIndex) => ({
       importDeclaration,
-      importGroup: classifyImportGroup(importDeclaration.moduleSpecifier),
+      importGroup: classifyImportGroup(
+        importDeclaration.moduleSpecifier,
+        internalPatterns,
+      ),
       originalIndex,
     }),
   );
@@ -1057,7 +1088,8 @@ function sortImportSegment(
 /** 副作用 import 保持原顺序，并把普通 import 分隔为独立排序片段。 */
 function renderSortedImportLines(
   importDeclarations: readonly ParsedImportDeclaration[],
-  sortOptions: Required<SortOptions>,
+  sortOptions: ResolvedEsmOptions,
+  internalPatterns: readonly string[],
 ): string[] {
   let currentSortableImportDeclarations: ParsedImportDeclaration[] = [];
 
@@ -1114,6 +1146,7 @@ function renderSortedImportLines(
         ...sortImportSegment(
           importChunk.importDeclarations,
           sortOptions,
+          internalPatterns,
           importGroupOrder,
         ),
       );
@@ -1174,7 +1207,8 @@ function hasPositionSensitiveEslintCommentWithinRange(
 function buildImportSegmentEdits(
   sourceText: string,
   importEntries: readonly SortableImportEntry[],
-  sortOptions: Required<SortOptions>,
+  sortOptions: ResolvedEsmOptions,
+  internalPatterns: readonly string[],
   lineEnding: string,
   isBlankLineRequired: boolean,
 ): SourceTextEdit[] | null {
@@ -1188,6 +1222,7 @@ function buildImportSegmentEdits(
   const replacementText = renderSortedImportLines(
     importEntries.map(importEntry => importEntry.parsedImportDeclaration),
     sortOptions,
+    internalPatterns,
   ).join(lineEnding);
   const removalEdits: SourceTextEdit[] = importEntries
     .slice(1)
@@ -1231,7 +1266,8 @@ export function buildImportSortingEdits(
   sourceText: string,
   programStatements: readonly ParserAstNode[],
   sortedComments: readonly ParserAstCommentWithTextRange[],
-  sortOptions: Required<SortOptions>,
+  sortOptions: ResolvedEsmOptions,
+  internalPatterns: readonly string[],
   isPrettierFilePragmaPresent: boolean,
 ): SourceTextEdit[] {
   const importDeclarationNodes = programStatements.filter(
@@ -1353,6 +1389,7 @@ export function buildImportSortingEdits(
       sourceText,
       sortableSegment,
       sortOptions,
+      internalPatterns,
       lineEnding,
       isLastImportSegment,
     );

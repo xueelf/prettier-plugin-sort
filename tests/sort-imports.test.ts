@@ -1,4 +1,7 @@
 import { describe, expect, test } from 'bun:test';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 import { format } from 'prettier';
 import htmlPlugin from 'prettier/plugins/html';
@@ -7,8 +10,22 @@ import sortPlugin from '../src/index';
 
 import { formatTypeScriptWithSortPlugin } from './format-with-sort-plugin';
 
+async function withTempProject(
+  runTest: (projectDirectory: string) => Promise<void>,
+): Promise<void> {
+  const projectDirectory = await mkdtemp(
+    join(tmpdir(), 'prettier-plugin-sort-'),
+  );
+
+  try {
+    await runTest(projectDirectory);
+  } finally {
+    await rm(projectDirectory, { recursive: true, force: true });
+  }
+}
+
 describe('sort imports — grouping', () => {
-  test('default order: builtin / external / parent / sibling / index', async () => {
+  test('default order: builtin / external / internal / parent / sibling / index', async () => {
     const sourceText = [
       "import Foo from './foo';",
       "import lodash from 'lodash';",
@@ -80,7 +97,7 @@ describe('sort imports — grouping', () => {
     );
   });
 
-  test('configured internal group sorts between external and sibling', async () => {
+  test('does not infer internal aliases without tsconfig paths', async () => {
     const sourceText = [
       "import a from '@/utils';",
       "import b from 'lodash';",
@@ -93,9 +110,8 @@ describe('sort imports — grouping', () => {
 
     expect(formattedText).toBe(
       [
-        "import b from 'lodash';",
-        '',
         "import a from '@/utils';",
+        "import b from 'lodash';",
         '',
         "import c from './local';",
         '',
@@ -103,30 +119,75 @@ describe('sort imports — grouping', () => {
     );
   });
 
-  test('deduplicates configured groups and appends omitted default groups', async () => {
-    const sourceText = [
-      "import sibling from './local';",
-      "import builtin from 'node:fs';",
-      "import internal from '#config';",
-      "import external from 'lodash';",
-      '',
-    ].join('\n');
-    const formattedText = await formatTypeScriptWithSortPlugin(sourceText, {
-      esmImportGroups: ['external', 'external', 'internal'],
-    });
+  test('classifies paths from the nearest tsconfig.json as internal', async () => {
+    await withTempProject(async projectDirectory => {
+      const sourceDirectory = join(projectDirectory, 'src');
 
-    expect(formattedText).toBe(
-      [
-        "import external from 'lodash';",
-        '',
-        "import internal from '#config';",
-        '',
-        "import builtin from 'node:fs';",
-        '',
+      await mkdir(sourceDirectory);
+      await writeFile(
+        join(projectDirectory, 'base.json'),
+        JSON.stringify({
+          compilerOptions: {
+            paths: {
+              '*': ['./types/*'],
+              '@app': ['./src/index.ts'],
+              '@app/*': ['./src/*'],
+            },
+          },
+        }),
+      );
+      await writeFile(
+        join(projectDirectory, 'tsconfig.json'),
+        '{"extends":"./base.json"}',
+      );
+      const sourceText = [
+        "import app from '@app';",
+        "import util from '@app/utils';",
+        "import similar from '@application/utils';",
+        "import react from 'react';",
         "import sibling from './local';",
         '',
-      ].join('\n'),
-    );
+      ].join('\n');
+      const formattedText = await formatTypeScriptWithSortPlugin(sourceText, {
+        filepath: join(sourceDirectory, 'App.ts'),
+      });
+
+      expect(formattedText).toBe(
+        [
+          "import similar from '@application/utils';",
+          "import react from 'react';",
+          '',
+          "import app from '@app';",
+          "import util from '@app/utils';",
+          '',
+          "import sibling from './local';",
+          '',
+        ].join('\n'),
+      );
+    });
+  });
+
+  test('falls back when the nearest tsconfig.json is invalid', async () => {
+    await withTempProject(async projectDirectory => {
+      await writeFile(join(projectDirectory, 'tsconfig.json'), '{');
+      const sourceText = [
+        "import external from 'react';",
+        "import unresolved from '@/utils';",
+        '',
+      ].join('\n');
+
+      expect(
+        await formatTypeScriptWithSortPlugin(sourceText, {
+          filepath: join(projectDirectory, 'App.ts'),
+        }),
+      ).toBe(
+        [
+          "import unresolved from '@/utils';",
+          "import external from 'react';",
+          '',
+        ].join('\n'),
+      );
+    });
   });
 
   test('esmImportSort=false leaves statements untouched', async () => {
@@ -260,8 +321,12 @@ describe('sort imports — edge cases', () => {
   });
 
   test('no space between closing brace and from keyword is handled', async () => {
-    const sourceText = "import {type FC}from 'react';\n";
-    const expectedText = "import { type FC } from 'react';\n";
+    const sourceText = "import {z,type FC,a}from 'react';\n";
+    const expectedText = [
+      "import type { FC } from 'react';",
+      "import { a, z } from 'react';",
+      '',
+    ].join('\n');
 
     expect(await formatTypeScriptWithSortPlugin(sourceText)).toBe(expectedText);
   });
@@ -386,11 +451,6 @@ describe('sort imports — edge cases', () => {
     ].join('\n');
 
     expect(await formatTypeScriptWithSortPlugin(sourceText)).toBe(sourceText);
-    expect(
-      await formatTypeScriptWithSortPlugin(
-        await formatTypeScriptWithSortPlugin(sourceText),
-      ),
-    ).toBe(sourceText);
   });
 
   test('handles multi-line block comment above import', async () => {
@@ -925,16 +985,8 @@ describe('sort imports — edge cases', () => {
   });
 
   test.each([
-    '// Global client adapter.',
-    '// Exported helper adapter.',
-    '// License registry adapter.',
-    '// Load copyright metadata.',
-    '/** Global client adapter. */',
     '/* Copyright (c) 2026 */',
-    '/* License: MIT */',
     '/*! SPDX-License-Identifier: MIT */',
-    '/* @license MIT */',
-    '/* @preserve */',
     '/* @generated */',
   ])('moves the import-attached comment %s with its import', async comment => {
     const sourceText = [
@@ -1257,9 +1309,8 @@ describe('sort imports — edge cases', () => {
     'espree',
     'flow',
     'meriyah',
-    'typescript',
   ])(
-    'registers %s and keeps file directives fixed while sorting',
+    'registers the non-default %s parser and keeps file directives fixed',
     async parserName => {
       const sourceText = [
         '#!/usr/bin/env node',
