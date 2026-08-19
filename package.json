@@ -52,7 +52,7 @@
     "@eslint/js": "^10.0.1",
     "@types/bun": "^1.3.14",
     "@types/semver": "^7.7.1",
-    "annal": "^0.0.2",
+    "annal": "^0.2.0",
     "eslint": "^10.4.0",
     "husky": "^9.1.7",
     "typescript": "^6.0.3",
