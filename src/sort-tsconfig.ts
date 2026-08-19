@@ -1,6 +1,6 @@
 import { type Parser, type ParserOptions } from 'prettier';
 
-import { resolveTsconfigOptions } from './options';
+import { resolveTsconfigOptions } from '#/options';
 import {
   type ParserAstCommentWithTextRange,
   type ParserAstNode,
@@ -10,13 +10,13 @@ import {
   getSortedAstCommentsWithTextRanges,
   isParserAstNode,
   isPrettierIgnored,
-} from './parser-ast';
-import { type SourceTextEdit, applySourceTextEdits } from './utils/source-text';
+} from '#/parser-ast';
+import { type SourceTextEdit, applySourceTextEdits } from '#/utils/source-text';
 import {
   COMPILER_OPTION_FIELD_GROUPS,
-  TS_CONFIG_ROOT_FIRST_FIELDS,
-  TS_CONFIG_ROOT_LAST_FIELDS,
-} from './utils/tsconfig-rules';
+  TSCONFIG_ROOT_FIRST_FIELDS,
+  TSCONFIG_ROOT_LAST_FIELDS,
+} from '#/utils/tsconfig-rules';
 
 function createFieldIndexes(
   fieldNames: readonly string[],
@@ -36,11 +36,9 @@ const COMPILER_OPTION_FIELD_GROUP_INDEXES = new Map<string, number>(
   ),
 );
 
-const ROOT_FIRST_FIELD_INDEXES = createFieldIndexes(
-  TS_CONFIG_ROOT_FIRST_FIELDS,
-);
+const ROOT_FIRST_FIELD_INDEXES = createFieldIndexes(TSCONFIG_ROOT_FIRST_FIELDS);
 
-const ROOT_LAST_FIELD_INDEXES = createFieldIndexes(TS_CONFIG_ROOT_LAST_FIELDS);
+const ROOT_LAST_FIELD_INDEXES = createFieldIndexes(TSCONFIG_ROOT_LAST_FIELDS);
 
 interface RenderedProperty {
   readonly name: string;
@@ -49,7 +47,7 @@ interface RenderedProperty {
 }
 
 interface RenderedObject {
-  readonly isOrderChanged: boolean;
+  readonly hasOrderChanged: boolean;
   readonly sourceText: string;
 }
 
@@ -246,7 +244,7 @@ function renderObject(
   const objectSource = sourceText.slice(objectRange.start, objectRange.end);
 
   if (propertyNodes.length === 0) {
-    return { isOrderChanged: false, sourceText: objectSource };
+    return { hasOrderChanged: false, sourceText: objectSource };
   }
   if (hasDirectComments(objectNode, propertyNodes, sortedComments)) {
     return null;
@@ -274,13 +272,13 @@ function renderObject(
     fieldIndexes,
     lastFieldIndexes,
   );
-  const isOrderChanged = sortedProperties.some(
+  const hasOrderChanged = sortedProperties.some(
     (renderedProperty, propertyIndex) =>
       renderedProperty.originalIndex !== propertyIndex,
   );
 
   return {
-    isOrderChanged,
+    hasOrderChanged,
     sourceText: `{${sortedProperties
       .map(
         (renderedProperty, propertyIndex) =>
@@ -382,7 +380,7 @@ export async function preprocessTsconfig(
         }
       }
     }
-    const renderedTsconfig = renderObject(
+    const renderedRoot = renderObject(
       sourceText,
       rootNode,
       sortedComments,
@@ -394,13 +392,13 @@ export async function preprocessTsconfig(
     const sourceTextEdits: SourceTextEdit[] = [];
 
     if (
-      renderedTsconfig &&
-      (renderedTsconfig.isOrderChanged || propertyReplacements)
+      renderedRoot &&
+      (renderedRoot.hasOrderChanged || propertyReplacements)
     ) {
       sourceTextEdits.push({
         start: rootRange.start,
         end: rootRange.end,
-        replacementText: renderedTsconfig.sourceText,
+        replacementText: renderedRoot.sourceText,
       });
     } else if (compilerOptionsEdit) {
       sourceTextEdits.push(compilerOptionsEdit);

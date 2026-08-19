@@ -24,6 +24,11 @@
   "license": "MIT",
   "author": "Yuki <admin@yuki.sh>",
   "type": "module",
+  "imports": {
+    "#/*": {
+      "types": "./dist/*.d.ts"
+    }
+  },
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",

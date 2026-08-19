@@ -1,20 +1,18 @@
 import { type Parser, type ParserOptions } from 'prettier';
 
-import { resolveEsmOptions } from './options';
+import { resolveEsmOptions } from '#/options';
 import {
   type ParserAstNode,
   getProgramComments,
   getProgramStatements,
   getSortedAstCommentsWithTextRanges,
-} from './parser-ast';
-import { buildExportSortingEdits } from './sort-exports';
-import { buildImportSortingEdits } from './sort-imports';
-import { type SourceTextEdit, applySourceTextEdits } from './utils/source-text';
+} from '#/parser-ast';
+import { buildExportSortingEdits } from '#/sort-exports';
+import { buildImportSortingEdits } from '#/sort-imports';
+import { type SourceTextEdit, applySourceTextEdits } from '#/utils/source-text';
 
-/** 从当前文件最近的 tsconfig.json 读取 paths，失败时不影响格式化。 */
-async function getTsconfigInternalPatterns(
-  filePath?: string,
-): Promise<string[]> {
+/** 按需动态加载 get-tsconfig，避免浏览器加载插件时初始化其 Node.js 依赖，失败时静默回退。 */
+async function getTsconfigPathPatterns(filePath?: string): Promise<string[]> {
   if (!filePath) {
     return [];
   }
@@ -60,10 +58,10 @@ export async function sortTypeScript(
 
   if (sortOptions.esmImportSort) {
     const isPrettierFilePragmaPresent = parser.hasPragma?.(sourceText) ?? false;
-    const internalPatterns = programStatements.some(
+    const pathPatterns = programStatements.some(
       statement => statement.type === 'ImportDeclaration',
     )
-      ? await getTsconfigInternalPatterns(prettierOptions.filepath)
+      ? await getTsconfigPathPatterns(prettierOptions.filepath)
       : [];
 
     sortingEdits.push(
@@ -72,7 +70,7 @@ export async function sortTypeScript(
         programStatements,
         sortedComments,
         sortOptions,
-        internalPatterns,
+        pathPatterns,
         isPrettierFilePragmaPresent,
       ),
     );

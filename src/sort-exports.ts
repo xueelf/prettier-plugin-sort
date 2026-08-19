@@ -5,8 +5,8 @@ import {
   getAstNodeName,
   getAstNodeTextRange,
   isPrettierIgnored,
-} from './parser-ast';
-import { type SourceTextEdit } from './utils/source-text';
+} from '#/parser-ast';
+import { type SourceTextEdit } from '#/utils/source-text';
 
 interface SortableExportSpecifier {
   originalIndex: number;

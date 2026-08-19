@@ -2,7 +2,7 @@ import {
   type ImportGroup,
   type ResolvedEsmOptions,
   type TypeImportStyle,
-} from './options';
+} from '#/options';
 import {
   type ParserAstComment,
   type ParserAstCommentWithTextRange,
@@ -13,12 +13,12 @@ import {
   getAstNodeTextRange,
   isPrettierIgnored,
   isSourceRangeWhitespaceOrComments,
-} from './parser-ast';
+} from '#/parser-ast';
 import {
   type SourceTextEdit,
   type SourceTextRange,
   applySourceTextEdits,
-} from './utils/source-text';
+} from '#/utils/source-text';
 
 const INDEX_MODULE_PATTERN = /^\.\/index(?:\.[^/]+)*$/;
 const PRETTIER_FILE_PRAGMA_DIRECTIVES = ['@format', '@prettier'] as const;
@@ -175,23 +175,20 @@ function getPrettierFilePragmaComment(
   );
 }
 
-function matchesInternalPattern(
+function matchesPathPattern(
   moduleSpecifier: string,
-  internalPattern: string,
+  pathPattern: string,
 ): boolean {
-  const wildcardIndex = internalPattern.indexOf('*');
+  const wildcardIndex = pathPattern.indexOf('*');
 
   if (wildcardIndex < 0) {
-    return moduleSpecifier === internalPattern;
+    return moduleSpecifier === pathPattern;
   }
-  if (
-    internalPattern === '*' ||
-    wildcardIndex !== internalPattern.lastIndexOf('*')
-  ) {
+  if (pathPattern === '*' || wildcardIndex !== pathPattern.lastIndexOf('*')) {
     return false;
   }
-  const prefix = internalPattern.slice(0, wildcardIndex);
-  const suffix = internalPattern.slice(wildcardIndex + 1);
+  const prefix = pathPattern.slice(0, wildcardIndex);
+  const suffix = pathPattern.slice(wildcardIndex + 1);
 
   return (
     moduleSpecifier.length >= prefix.length + suffix.length &&
@@ -202,7 +199,7 @@ function matchesInternalPattern(
 
 function classifyImportGroup(
   moduleSpecifier: string,
-  internalPatterns: readonly string[],
+  pathPatterns: readonly string[],
 ): ImportGroup {
   if (
     moduleSpecifier === 'bun' ||
@@ -225,8 +222,8 @@ function classifyImportGroup(
     return 'sibling';
   }
   if (
-    internalPatterns.some(internalPattern =>
-      matchesInternalPattern(moduleSpecifier, internalPattern),
+    pathPatterns.some(pathPattern =>
+      matchesPathPattern(moduleSpecifier, pathPattern),
     )
   ) {
     return 'internal';
@@ -1008,10 +1005,10 @@ function getImportBindingShapeRank(
   return 2;
 }
 
-function sortImportSegment(
+function renderSortedImportSegment(
   importDeclarations: readonly ParsedImportDeclaration[],
   sortOptions: ResolvedEsmOptions,
-  internalPatterns: readonly string[],
+  pathPatterns: readonly string[],
   importGroupOrder: ReadonlyMap<ImportGroup, number>,
 ): string[] {
   let mergedImportDeclarations = [...importDeclarations];
@@ -1029,7 +1026,7 @@ function sortImportSegment(
       importDeclaration,
       importGroup: classifyImportGroup(
         importDeclaration.moduleSpecifier,
-        internalPatterns,
+        pathPatterns,
       ),
       originalIndex,
     }),
@@ -1069,7 +1066,7 @@ function sortImportSegment(
   });
 
   let previousImportGroup: ImportGroup | null = null;
-  const renderedImportLines: string[] = [];
+  const renderedImports: string[] = [];
 
   for (const { importDeclaration, importGroup } of rankedImportDeclarations) {
     if (
@@ -1077,19 +1074,19 @@ function sortImportSegment(
       previousImportGroup !== null &&
       importGroup !== previousImportGroup
     ) {
-      renderedImportLines.push('');
+      renderedImports.push('');
     }
-    renderedImportLines.push(renderImportDeclaration(importDeclaration));
+    renderedImports.push(renderImportDeclaration(importDeclaration));
     previousImportGroup = importGroup;
   }
-  return renderedImportLines;
+  return renderedImports;
 }
 
 /** 副作用 import 保持原顺序，并把普通 import 分隔为独立排序片段。 */
-function renderSortedImportLines(
+function renderSortedImports(
   importDeclarations: readonly ParsedImportDeclaration[],
   sortOptions: ResolvedEsmOptions,
-  internalPatterns: readonly string[],
+  pathPatterns: readonly string[],
 ): string[] {
   let currentSortableImportDeclarations: ParsedImportDeclaration[] = [];
 
@@ -1131,7 +1128,7 @@ function renderSortedImportLines(
     });
   }
   let previousChunkKind: 'sortable' | 'side-effect' | null = null;
-  const renderedImportLines: string[] = [];
+  const renderedImports: string[] = [];
 
   for (const importChunk of importDeclarationChunks) {
     if (
@@ -1139,25 +1136,25 @@ function renderSortedImportLines(
       previousChunkKind !== null &&
       previousChunkKind !== importChunk.kind
     ) {
-      renderedImportLines.push('');
+      renderedImports.push('');
     }
     if (importChunk.kind === 'sortable') {
-      renderedImportLines.push(
-        ...sortImportSegment(
+      renderedImports.push(
+        ...renderSortedImportSegment(
           importChunk.importDeclarations,
           sortOptions,
-          internalPatterns,
+          pathPatterns,
           importGroupOrder,
         ),
       );
     } else {
-      renderedImportLines.push(
+      renderedImports.push(
         renderImportDeclaration(importChunk.importDeclaration),
       );
     }
     previousChunkKind = importChunk.kind;
   }
-  return renderedImportLines;
+  return renderedImports;
 }
 
 interface SortableImportEntry {
@@ -1208,7 +1205,7 @@ function buildImportSegmentEdits(
   sourceText: string,
   importEntries: readonly SortableImportEntry[],
   sortOptions: ResolvedEsmOptions,
-  internalPatterns: readonly string[],
+  pathPatterns: readonly string[],
   lineEnding: string,
   isBlankLineRequired: boolean,
 ): SourceTextEdit[] | null {
@@ -1219,10 +1216,10 @@ function buildImportSegmentEdits(
   }
   let trailingLineBreaks = lineEnding;
 
-  const replacementText = renderSortedImportLines(
+  const replacementText = renderSortedImports(
     importEntries.map(importEntry => importEntry.parsedImportDeclaration),
     sortOptions,
-    internalPatterns,
+    pathPatterns,
   ).join(lineEnding);
   const removalEdits: SourceTextEdit[] = importEntries
     .slice(1)
@@ -1267,7 +1264,7 @@ export function buildImportSortingEdits(
   programStatements: readonly ParserAstNode[],
   sortedComments: readonly ParserAstCommentWithTextRange[],
   sortOptions: ResolvedEsmOptions,
-  internalPatterns: readonly string[],
+  pathPatterns: readonly string[],
   isPrettierFilePragmaPresent: boolean,
 ): SourceTextEdit[] {
   const importDeclarationNodes = programStatements.filter(
@@ -1389,7 +1386,7 @@ export function buildImportSortingEdits(
       sourceText,
       sortableSegment,
       sortOptions,
-      internalPatterns,
+      pathPatterns,
       lineEnding,
       isLastImportSegment,
     );

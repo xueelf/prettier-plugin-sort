@@ -2,13 +2,13 @@ import { type Parser, type ParserOptions } from 'prettier';
 import findMinimumSemanticVersion from 'semver/ranges/min-version.js';
 import getValidSemanticVersionRange from 'semver/ranges/valid.js';
 
-import { isPackageSortEnabled } from './options';
+import { isPackageSortEnabled } from '#/options';
 import {
   type ParserAstNode,
   getAstNodeName,
   getAstNodeTextRange,
   isParserAstNode,
-} from './parser-ast';
+} from '#/parser-ast';
 import {
   DIRECTORY_FIELD_ORDER,
   ESLINT_CONFIG_FIELD_ORDER,
@@ -17,7 +17,7 @@ import {
   PACKAGE_JSON_FIELD_ORDER,
   PNPM_CONFIG_FIELD_ORDER,
   WIREIT_SCRIPT_FIELD_ORDER,
-} from './utils/package-rules';
+} from '#/utils/package-rules';
 
 /** 保留 JSON 字符串和数字的源码写法。 */
 class JsonSourceLiteral<Value extends number | string = number | string> {
@@ -52,7 +52,10 @@ const PACKAGE_JSON_FIELD_INDEXES = new Map<string, number>(
   PACKAGE_JSON_FIELD_ORDER.map((fieldName, index) => [fieldName, index]),
 );
 
-function compareText(leftText: string, rightText: string): number {
+function compareStringsCaseSensitive(
+  leftText: string,
+  rightText: string,
+): number {
   if (leftText === rightText) {
     return 0;
   }
@@ -287,7 +290,7 @@ function deduplicateStringValues(
 
 function sortJsonObject(
   jsonObject: JsonObject,
-  compareKeys: JsonKeyComparator = compareText,
+  compareKeys: JsonKeyComparator = compareStringsCaseSensitive,
 ): JsonObject {
   return Object.fromEntries(
     Object.entries(jsonObject).sort(([leftKey], [rightKey]) =>
@@ -319,7 +322,7 @@ function sortJsonObjectByKeyOrder(
     if (isRightKeyKnown) {
       return 1;
     }
-    return compareText(leftKey, rightKey);
+    return compareStringsCaseSensitive(leftKey, rightKey);
   });
 }
 
@@ -369,7 +372,10 @@ function sortUniqueStringArrayValue(fieldValue: JsonValue): JsonValue {
     return fieldValue;
   }
   return deduplicateStringValues(fieldValue).sort((leftValue, rightValue) =>
-    compareText(getJsonString(leftValue)!, getJsonString(rightValue)!),
+    compareStringsCaseSensitive(
+      getJsonString(leftValue)!,
+      getJsonString(rightValue)!,
+    ),
   );
 }
 
@@ -413,11 +419,11 @@ function sortPackageJsonFields(packageJson: JsonObject): JsonObject {
     if (isLeftFieldPrivate !== isRightFieldPrivate) {
       return isLeftFieldPrivate ? 1 : -1;
     }
-    return compareText(leftFieldName, rightFieldName);
+    return compareStringsCaseSensitive(leftFieldName, rightFieldName);
   });
 }
 
-/** 依赖名称始终按 npm 的英文区域规则排列。 */
+/** dependency name 始终使用 npm 的 `String.prototype.localeCompare(..., 'en')` 排列。 */
 function sortDependencyObject(dependencyObject: JsonObject): JsonObject {
   return sortJsonObject(dependencyObject, (leftName, rightName) =>
     leftName.localeCompare(rightName, 'en'),
@@ -488,7 +494,7 @@ function sortEslintConfigValue(fieldValue: JsonValue): JsonValue {
 function sortPrettierConfigObject(prettierConfig: JsonObject): JsonObject {
   const keyOrder = Object.keys(prettierConfig)
     .filter(key => key !== 'overrides')
-    .sort(compareText);
+    .sort(compareStringsCaseSensitive);
 
   if (Object.hasOwn(prettierConfig, 'overrides')) {
     keyOrder.push('overrides');
@@ -619,35 +625,37 @@ function sortScriptNames(
     groupedScriptNames.push(scriptName);
     scriptGroups.set(scriptGroupName, groupedScriptNames);
   }
-  return [...scriptGroups.keys()].sort(compareText).flatMap(scriptGroupName => {
-    const groupedScriptNames = scriptGroups.get(scriptGroupName)!;
-    const isNestedGroup =
-      groupedScriptNames.length > 1 &&
-      groupedScriptNames.some(
-        scriptName =>
-          scriptName !== scriptGroupName &&
-          scriptName.startsWith(`${scriptGroupName}:`),
+  return [...scriptGroups.keys()]
+    .sort(compareStringsCaseSensitive)
+    .flatMap(scriptGroupName => {
+      const groupedScriptNames = scriptGroups.get(scriptGroupName)!;
+      const isNestedGroup =
+        groupedScriptNames.length > 1 &&
+        groupedScriptNames.some(
+          scriptName =>
+            scriptName !== scriptGroupName &&
+            scriptName.startsWith(`${scriptGroupName}:`),
+        );
+
+      if (!isNestedGroup) {
+        return groupedScriptNames.sort(compareStringsCaseSensitive);
+      }
+      const directScriptNames = groupedScriptNames
+        .filter(
+          scriptName =>
+            scriptName === scriptGroupName ||
+            !scriptName.startsWith(`${scriptGroupName}:`),
+        )
+        .sort(compareStringsCaseSensitive);
+      const nestedScriptNames = groupedScriptNames.filter(scriptName =>
+        scriptName.startsWith(`${scriptGroupName}:`),
       );
 
-    if (!isNestedGroup) {
-      return groupedScriptNames.sort(compareText);
-    }
-    const directScriptNames = groupedScriptNames
-      .filter(
-        scriptName =>
-          scriptName === scriptGroupName ||
-          !scriptName.startsWith(`${scriptGroupName}:`),
-      )
-      .sort(compareText);
-    const nestedScriptNames = groupedScriptNames.filter(scriptName =>
-      scriptName.startsWith(`${scriptGroupName}:`),
-    );
-
-    return [
-      ...directScriptNames,
-      ...sortScriptNames(nestedScriptNames, scriptGroupName),
-    ];
-  });
+      return [
+        ...directScriptNames,
+        ...sortScriptNames(nestedScriptNames, scriptGroupName),
+      ];
+    });
 }
 
 /**
@@ -835,7 +843,10 @@ function comparePnpmOverrideSelectors(
   const rightVersion = getMinimumSemanticVersion(rightPackage.versionRange);
 
   if (!leftVersion && !rightVersion) {
-    return compareText(leftPackage.versionRange, rightPackage.versionRange);
+    return compareStringsCaseSensitive(
+      leftPackage.versionRange,
+      rightPackage.versionRange,
+    );
   }
   if (!leftVersion) {
     return 1;
@@ -852,7 +863,7 @@ function sortDependencyMetadataValue(fieldValue: JsonValue): JsonValue {
       leftIdentifier,
       rightIdentifier,
     ) =>
-      compareText(
+      compareStringsCaseSensitive(
         getDependencyName(leftIdentifier),
         getDependencyName(rightIdentifier),
       );
@@ -882,7 +893,7 @@ function sortPnpmConfigValue(fieldValue: JsonValue): JsonValue {
   });
 }
 
-/** 各字段的局部规则与 sort-package-json 4.0.0 保持一致。 */
+/** 局部规则基于 sort-package-json 4.0.0，dependencies 等字段固定使用 npm comparator。 */
 const PACKAGE_JSON_FIELD_SORTERS: Readonly<
   Partial<Record<string, PackageJsonFieldSorter>>
 > = {

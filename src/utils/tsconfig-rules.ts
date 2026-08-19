@@ -5,9 +5,9 @@
  * @see {@link https://www.typescriptlang.org/docs/handbook/tsconfig-json#tsconfig-bases | TypeScript TSConfig Bases}
  * @see {@link https://www.typescriptlang.org/docs/handbook/tsconfig-json#examples | TypeScript TSConfig Examples}
  */
-export const TS_CONFIG_ROOT_FIRST_FIELDS = ['$schema', 'extends'] as const;
+export const TSCONFIG_ROOT_FIRST_FIELDS = ['$schema', 'extends'] as const;
 
-export const TS_CONFIG_ROOT_LAST_FIELDS = [
+export const TSCONFIG_ROOT_LAST_FIELDS = [
   'files',
   'include',
   'exclude',

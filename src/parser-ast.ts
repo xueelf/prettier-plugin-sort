@@ -1,4 +1,4 @@
-import { type SourceTextRange } from './utils/source-text';
+import { type SourceTextRange } from '#/utils/source-text';
 
 /**
  * 已注册 Prettier parser 的源码偏移字段。

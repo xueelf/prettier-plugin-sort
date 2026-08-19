@@ -5,10 +5,10 @@ import flowPlugin from 'prettier/plugins/flow';
 import meriyahPlugin from 'prettier/plugins/meriyah';
 import typescriptPlugin from 'prettier/plugins/typescript';
 
-import { options } from './options';
-import { preprocessPackageJson } from './sort-package';
-import { preprocessTsconfig } from './sort-tsconfig';
-import { sortTypeScript } from './sort-typescript';
+import { options } from '#/options';
+import { preprocessPackageJson } from '#/sort-package';
+import { preprocessTsconfig } from '#/sort-tsconfig';
+import { sortTypeScript } from '#/sort-typescript';
 
 type ParserPreprocessTransform = (
   sourceText: string,
@@ -39,13 +39,13 @@ async function preprocessJson(
   prettierOptions: ParserOptions,
   parser: Parser,
 ): Promise<string> {
-  const sortedPackageJson = await preprocessPackageJson(
+  const packagePreprocessedText = await preprocessPackageJson(
     sourceText,
     prettierOptions,
     parser,
   );
 
-  return preprocessTsconfig(sortedPackageJson, prettierOptions, parser);
+  return preprocessTsconfig(packagePreprocessedText, prettierOptions, parser);
 }
 
 const sortPlugin: Plugin = {
@@ -80,5 +80,5 @@ const sortPlugin: Plugin = {
 };
 
 export default sortPlugin;
-export { options } from './options';
-export type { ImportGroup, SortOptions, TypeImportStyle } from './options';
+export { options } from '#/options';
+export type { ImportGroup, SortOptions, TypeImportStyle } from '#/options';
