@@ -1,6 +1,6 @@
 {
   "name": "prettier-plugin-sort",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "A Prettier plugin for sorting ES module imports, export specifiers, and fields in package.json and tsconfig.json.",
   "keywords": [
     "imports",
