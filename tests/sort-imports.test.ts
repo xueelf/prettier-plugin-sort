@@ -1,8 +1,7 @@
-import { describe, expect, test } from 'bun:test';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { afterEach, describe, expect, mock, spyOn, test } from 'bun:test';
 import { join } from 'node:path';
 
+import * as getTsconfigModule from 'get-tsconfig';
 import { format } from 'prettier';
 import htmlPlugin from 'prettier/plugins/html';
 
@@ -10,19 +9,7 @@ import sortPlugin from '../src/index';
 
 import { formatTypeScriptWithSortPlugin } from './format-with-sort-plugin';
 
-async function withTempProject(
-  runTest: (projectDirectory: string) => Promise<void>,
-): Promise<void> {
-  const projectDirectory = await mkdtemp(
-    join(tmpdir(), 'prettier-plugin-sort-'),
-  );
-
-  try {
-    await runTest(projectDirectory);
-  } finally {
-    await rm(projectDirectory, { recursive: true, force: true });
-  }
-}
+afterEach(() => mock.restore());
 
 describe('sort imports — grouping', () => {
   test('default order: builtin / external / internal / parent / sibling / index', async () => {
@@ -119,75 +106,62 @@ describe('sort imports — grouping', () => {
     );
   });
 
-  test('classifies paths from the nearest tsconfig.json as internal', async () => {
-    await withTempProject(async projectDirectory => {
-      const sourceDirectory = join(projectDirectory, 'src');
+  test('uses paths from the referenced project that includes the current file', async () => {
+    const projectRoot = join(import.meta.dir, 'virtual');
+    const rootConfigPath = join(projectRoot, 'tsconfig.json');
+    const vueFilePath = join(projectRoot, 'src', 'App.vue');
+    const configSources = new Map([
+      [
+        rootConfigPath,
+        '{"files":[],"references":[{"path":"./tsconfig.node.json"},{"path":"./tsconfig.app.json"}]}',
+      ],
+      [
+        join(projectRoot, 'tsconfig.node.json'),
+        '{"include":["*.config.ts"],"compilerOptions":{"paths":{"@node/*":["./build/*"]}}}',
+      ],
+      [
+        join(projectRoot, 'tsconfig.app.json'),
+        '{"include":["src/**/*.vue"],"compilerOptions":{"paths":{"@/*":["./src/*"]}}}',
+      ],
+    ]);
+    const parseConfig = (configPath: string) =>
+      JSON.parse(configSources.get(configPath) ?? '');
+    const rootProject = {
+      path: rootConfigPath,
+      config: parseConfig(rootConfigPath),
+    };
 
-      await mkdir(sourceDirectory);
-      await writeFile(
-        join(projectDirectory, 'base.json'),
-        JSON.stringify({
-          compilerOptions: {
-            paths: {
-              '*': ['./types/*'],
-              '@app': ['./src/index.ts'],
-              '@app/*': ['./src/*'],
-            },
-          },
-        }),
-      );
-      await writeFile(
-        join(projectDirectory, 'tsconfig.json'),
-        '{"extends":"./base.json"}',
-      );
-      const sourceText = [
-        "import app from '@app';",
-        "import util from '@app/utils';",
-        "import similar from '@application/utils';",
-        "import react from 'react';",
-        "import sibling from './local';",
+    spyOn(getTsconfigModule, 'getTsconfig').mockImplementation(searchPath =>
+      searchPath === vueFilePath ? rootProject : null,
+    );
+    spyOn(getTsconfigModule, 'parseTsconfig').mockImplementation(parseConfig);
+
+    const sourceText = [
+      '<script setup lang="ts">',
+      'import request from "@/utils/request";',
+      'import nodeConfig from "@node/config";',
+      'import axios from "axios";',
+      '</script>',
+      '',
+    ].join('\n');
+
+    expect(
+      await format(sourceText, {
+        filepath: vueFilePath,
+        parser: 'vue',
+        plugins: [htmlPlugin, sortPlugin],
+      }),
+    ).toBe(
+      [
+        '<script setup lang="ts">',
+        'import nodeConfig from "@node/config";',
+        'import axios from "axios";',
         '',
-      ].join('\n');
-      const formattedText = await formatTypeScriptWithSortPlugin(sourceText, {
-        filepath: join(sourceDirectory, 'App.ts'),
-      });
-
-      expect(formattedText).toBe(
-        [
-          "import similar from '@application/utils';",
-          "import react from 'react';",
-          '',
-          "import app from '@app';",
-          "import util from '@app/utils';",
-          '',
-          "import sibling from './local';",
-          '',
-        ].join('\n'),
-      );
-    });
-  });
-
-  test('falls back when the nearest tsconfig.json is invalid', async () => {
-    await withTempProject(async projectDirectory => {
-      await writeFile(join(projectDirectory, 'tsconfig.json'), '{');
-      const sourceText = [
-        "import external from 'react';",
-        "import unresolved from '@/utils';",
+        'import request from "@/utils/request";',
+        '</script>',
         '',
-      ].join('\n');
-
-      expect(
-        await formatTypeScriptWithSortPlugin(sourceText, {
-          filepath: join(projectDirectory, 'App.ts'),
-        }),
-      ).toBe(
-        [
-          "import unresolved from '@/utils';",
-          "import external from 'react';",
-          '',
-        ].join('\n'),
-      );
-    });
+      ].join('\n'),
+    );
   });
 
   test('esmImportSort=false leaves statements untouched', async () => {

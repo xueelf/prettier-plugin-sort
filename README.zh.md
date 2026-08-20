@@ -56,20 +56,20 @@ npm i -D prettier prettier-plugin-sort
 
 `esmImportGroups` 支持以下分组：
 
-| 分组       | 匹配范围                                                  |
-| ---------- | --------------------------------------------------------- |
-| `builtin`  | 以 `node:`、`bun:` 开头的模块，以及 `bun`                 |
-| `external` | 第三方包，以及没有匹配其他分组的模块路径                  |
-| `internal` | `tsconfig.json` 中 `compilerOptions.paths` 定义的路径别名 |
-| `parent`   | `../utils` 这类指向上级目录的相对路径                     |
-| `sibling`  | `./Button` 这类指向同级目录的相对路径                     |
-| `index`    | `.`、`./`、`./index` 及带扩展名的 `./index`               |
+| 分组       | 匹配范围                                                                    |
+| ---------- | --------------------------------------------------------------------------- |
+| `builtin`  | 以 `node:`、`bun:` 开头的模块，以及 `bun`                                   |
+| `external` | 第三方包，以及没有匹配其他分组的模块路径                                    |
+| `internal` | 当前文件所属 TypeScript project 的 `compilerOptions.paths` 中定义的路径别名 |
+| `parent`   | `../utils` 这类指向上级目录的相对路径                                       |
+| `sibling`  | `./Button` 这类指向同级目录的相对路径                                       |
+| `index`    | `.`、`./`、`./index` 及带扩展名的 `./index`                                 |
 
 现代 Node.js 代码应使用 [`node:` URL](https://nodejs.org/api/esm.html#node-imports) 显式引用内置模块。本插件也只把带 `node:` 前缀的内置模块归入 `builtin`。`fs`、`path` 等未带前缀的模块归入 `external`。
 
 默认顺序就是表中的顺序。配置数组会自动去重，遗漏的默认分组则按默认顺序补到末尾。
 
-插件会从当前文件所在目录向上查找最近的 `tsconfig.json`，并根据解析后的 `compilerOptions.paths` 识别 `internal`。继承配置中的 `paths` 同样有效。没有在 `paths` 中声明的非相对路径仍归入 `external`。`*` 无法区分项目代码和第三方包，因此不会用于判断 `internal`。
+插件会从当前文件所在目录向上查找最近的 `tsconfig.json`，根据 `files`、`include` 和 `exclude` 选择包含当前文件的 TypeScript project，并在需要时沿 `references` 查找。每个 project 都会先解析 `extends`，再匹配文件并读取 `compilerOptions.paths`。识别 `internal` 时只使用当前文件所属 project 的 `paths`，不会合并其他 referenced project 的 `paths`。没有在该 `paths` 中声明的非相对路径仍归入 `external`。`*` 无法区分项目代码和第三方包，因此不会用于判断 `internal`。
 
 将 `esmImportSeparation` 设为 `false` 后，分组之间和副作用 `import` 上下两侧都不再留空行。
 

@@ -56,20 +56,20 @@ Dynamic `import()` calls and import-like text in strings or comments are left un
 
 `esmImportGroups` accepts these values:
 
-| Group      | Matches                                                            |
-| ---------- | ------------------------------------------------------------------ |
-| `builtin`  | Modules beginning with `node:` or `bun:`, plus `bun`               |
-| `external` | Packages and module paths not matched by any other group           |
-| `internal` | Path aliases defined by `compilerOptions.paths` in `tsconfig.json` |
-| `parent`   | Parent-relative paths such as `../utils`                           |
-| `sibling`  | Sibling paths such as `./Button`                                   |
-| `index`    | `.`, `./`, `./index`, and `./index` with an optional extension     |
+| Group      | Matches                                                                                         |
+| ---------- | ----------------------------------------------------------------------------------------------- |
+| `builtin`  | Modules beginning with `node:` or `bun:`, plus `bun`                                            |
+| `external` | Packages and module paths not matched by any other group                                        |
+| `internal` | Path aliases from `compilerOptions.paths` in the TypeScript project containing the current file |
+| `parent`   | Parent-relative paths such as `../utils`                                                        |
+| `sibling`  | Sibling paths such as `./Button`                                                                |
+| `index`    | `.`, `./`, `./index`, and `./index` with an optional extension                                  |
 
 Modern Node.js code should reference built-ins explicitly with [`node:` URLs](https://nodejs.org/api/esm.html#node-imports). The plugin also classifies only `node:`-prefixed modules as `builtin`. Module specifiers without the prefix, such as `fs` and `path`, belong to `external`.
 
 The table also shows the default order. Duplicate entries are removed automatically, and omitted default groups are appended in their default order.
 
-The plugin searches upward from the current file for the nearest `tsconfig.json` and identifies `internal` imports from the resolved `compilerOptions.paths`. Inherited `paths` are supported. Non-relative paths not declared in `paths` remain `external`. The catch-all pattern `*` is ignored because it cannot distinguish project modules from third-party packages.
+The plugin searches upward from the current file for the nearest `tsconfig.json`, then uses `files`, `include`, and `exclude` to select the TypeScript project containing the file, following `references` when necessary. Each project is resolved through `extends` before matching the file and reading `compilerOptions.paths`. Only `paths` from the selected project are used to classify `internal`; `paths` from other referenced projects are not merged. Non-relative paths not declared there remain `external`. The catch-all pattern `*` is ignored because it cannot distinguish project modules from third-party packages.
 
 With `esmImportSeparation` set to `false`, blank lines are removed both between groups and around side-effect imports.
 
