@@ -32,7 +32,11 @@ type JsonPrimitive = boolean | JsonSourceLiteral | null | number | string;
 type JsonStringValue = JsonSourceLiteral<string> | string;
 type JsonValue = JsonObject | JsonPrimitive | JsonValue[];
 
-interface JsonObject extends Record<string, JsonValue> {}
+const JSON_KEY_ORDER = Symbol('jsonKeyOrder');
+
+interface JsonObject extends Record<string, JsonValue> {
+  [JSON_KEY_ORDER]?: readonly string[];
+}
 
 interface PackageSelector {
   name: string;
@@ -69,6 +73,26 @@ function isJsonObject(value: unknown): value is JsonObject {
     !Array.isArray(value) &&
     !(value instanceof JsonSourceLiteral)
   );
+}
+
+/** 数字字段名会被普通对象自动重排，单独保留源码或排序规则指定的顺序。 */
+function createJsonObject(
+  entries: readonly (readonly [string, JsonValue])[],
+): JsonObject {
+  const fields = new Map(entries);
+
+  return {
+    ...Object.fromEntries(fields),
+    [JSON_KEY_ORDER]: [...fields.keys()],
+  };
+}
+
+function getJsonKeys(jsonObject: JsonObject): readonly string[] {
+  return jsonObject[JSON_KEY_ORDER] ?? Object.keys(jsonObject);
+}
+
+function getJsonEntries(jsonObject: JsonObject): [string, JsonValue][] {
+  return getJsonKeys(jsonObject).map(key => [key, jsonObject[key]!]);
 }
 
 function getJsonPathKey(jsonPath: readonly JsonPathSegment[]): string {
@@ -179,6 +203,7 @@ function preserveJsonSourceLiterals(
       );
       jsonObject[propertyName] = propertyValue;
     }
+    jsonObject[JSON_KEY_ORDER] = [...propertyNames];
     return jsonObject;
   }
   if (parserJsonNode.type === 'ArrayExpression') {
@@ -248,7 +273,7 @@ function serializeJsonValue(
   if (isJsonObject(jsonValue)) {
     const serializedFields: string[] = [];
 
-    for (const [fieldName, fieldValue] of Object.entries(jsonValue)) {
+    for (const [fieldName, fieldValue] of getJsonEntries(jsonValue)) {
       const fieldPath = [...jsonPath, fieldName];
       const fieldNameSourceText = fieldNameSourceTexts.get(
         getJsonPathKey(fieldPath),
@@ -292,8 +317,8 @@ function sortJsonObject(
   jsonObject: JsonObject,
   compareKeys: JsonKeyComparator = compareStringsCaseSensitive,
 ): JsonObject {
-  return Object.fromEntries(
-    Object.entries(jsonObject).sort(([leftKey], [rightKey]) =>
+  return createJsonObject(
+    getJsonEntries(jsonObject).sort(([leftKey], [rightKey]) =>
       compareKeys(leftKey, rightKey),
     ),
   );
@@ -331,8 +356,8 @@ function sortJsonObjectRecursively(
   jsonObject: JsonObject,
   sortObject: (jsonObject: JsonObject) => JsonObject = sortJsonObject,
 ): JsonObject {
-  const sortedNestedValues = Object.fromEntries(
-    Object.entries(jsonObject).map(([key, value]) => [
+  const sortedNestedValues = createJsonObject(
+    getJsonEntries(jsonObject).map(([key, value]) => [
       key,
       isJsonObject(value)
         ? sortJsonObjectRecursively(value, sortObject)
@@ -534,8 +559,8 @@ function sortWireitScriptObject(scriptConfig: JsonObject): JsonObject {
   }
   if (isJsonObject(sortedConfig.env)) {
     sortedConfig.env = sortJsonObject(
-      Object.fromEntries(
-        Object.entries(sortedConfig.env).map(([name, value]) => [
+      createJsonObject(
+        getJsonEntries(sortedConfig.env).map(([name, value]) => [
           name,
           sortJsonObjectValueByKeyOrder(value, ['external', 'default']),
         ]),
@@ -561,8 +586,8 @@ function sortWireitValue(fieldValue: JsonValue): JsonValue {
     return fieldValue;
   }
   return sortJsonObject(
-    Object.fromEntries(
-      Object.entries(fieldValue).map(([scriptName, scriptConfig]) => [
+    createJsonObject(
+      getJsonEntries(fieldValue).map(([scriptName, scriptConfig]) => [
         scriptName,
         sortJsonObjectValue(scriptConfig, sortWireitScriptObject),
       ]),
@@ -669,7 +694,7 @@ function sortScriptsValue(
   if (!isJsonObject(fieldValue)) {
     return fieldValue;
   }
-  const scriptNames = Object.keys(fieldValue);
+  const scriptNames = getJsonKeys(fieldValue);
   const baseScriptNames = new Set<string>();
   const normalizedScriptNames = scriptNames.map(scriptName => {
     const baseScriptName = scriptName.replace(/^(?:pre|post)/, '');
@@ -691,7 +716,7 @@ function sortScriptsValue(
       : [baseScriptName],
   );
 
-  return Object.fromEntries(
+  return createJsonObject(
     orderedScriptNames
       .filter(scriptName => Object.hasOwn(fieldValue, scriptName))
       .map(scriptName => [scriptName, fieldValue[scriptName]!] as const),
@@ -703,7 +728,7 @@ function sortExportsValue(fieldValue: JsonValue): JsonValue {
   if (!isJsonObject(fieldValue)) {
     return fieldValue;
   }
-  const exportKeys = Object.keys(fieldValue);
+  const exportKeys = getJsonKeys(fieldValue);
   const exportPathKeys = exportKeys.filter(key => key.startsWith('.'));
   const exportConditionKeys = exportKeys.filter(
     key => !key.startsWith('.') && key !== 'default',
@@ -712,7 +737,7 @@ function sortExportsValue(fieldValue: JsonValue): JsonValue {
   if (Object.hasOwn(fieldValue, 'default')) {
     exportConditionKeys.push('default');
   }
-  return Object.fromEntries(
+  return createJsonObject(
     [...exportPathKeys, ...exportConditionKeys].map(
       exportKey =>
         [exportKey, sortExportsValue(fieldValue[exportKey]!)] as const,
@@ -996,8 +1021,8 @@ const PACKAGE_JSON_FIELD_SORTERS: Readonly<
 function sortPackageJsonObject(packageJson: JsonObject): JsonObject {
   const sortedPackageJsonFields = sortPackageJsonFields(packageJson);
 
-  return Object.fromEntries(
-    Object.entries(sortedPackageJsonFields).map(([fieldName, fieldValue]) => {
+  return createJsonObject(
+    getJsonEntries(sortedPackageJsonFields).map(([fieldName, fieldValue]) => {
       const fieldSorter = Object.hasOwn(PACKAGE_JSON_FIELD_SORTERS, fieldName)
         ? PACKAGE_JSON_FIELD_SORTERS[fieldName]
         : undefined;
