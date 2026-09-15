@@ -225,6 +225,25 @@ describe('sort tsconfig.json', () => {
     );
   });
 
+  test.each(['/* prettier-ignore */', '\n// prettier-ignore\n'])(
+    'respects %s between compilerOptions and its value',
+    async comment => {
+      const sourceText = `{"files":[],"compilerOptions":${comment}{"strict":true,"target":"ESNext"},"extends":"./base"}`;
+      const formattedText = await formatTsconfigWithSortPlugin(sourceText);
+
+      expect(formattedText).toContain('{"strict":true,"target":"ESNext"}');
+      expect(formattedText.indexOf('"extends"')).toBeLessThan(
+        formattedText.indexOf('"compilerOptions"'),
+      );
+      expect(formattedText.indexOf('"compilerOptions"')).toBeLessThan(
+        formattedText.indexOf('"files"'),
+      );
+      expect(await formatTsconfigWithSortPlugin(formattedText)).toBe(
+        formattedText,
+      );
+    },
+  );
+
   test('supports tsconfig.*.json and Windows paths', async () => {
     const formattedText = await formatTsconfigWithSortPlugin(
       '{"extends":"./base","compilerOptions":{"strict":true,"target":"ESNext"}}',

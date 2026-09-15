@@ -350,7 +350,8 @@ export async function preprocessTsconfig(
       if (
         propertyRange &&
         valueRange &&
-        !isPrettierIgnored(sourceText, propertyRange, sortedComments)
+        !isPrettierIgnored(sourceText, propertyRange, sortedComments) &&
+        !isPrettierIgnored(sourceText, valueRange, sortedComments)
       ) {
         const renderedCompilerOptions = renderObject(
           sourceText,
