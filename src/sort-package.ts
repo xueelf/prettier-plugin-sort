@@ -2,6 +2,7 @@ import { type Parser, type ParserOptions } from 'prettier';
 import findMinimumSemanticVersion from 'semver/ranges/min-version.js';
 import getValidSemanticVersionRange from 'semver/ranges/valid.js';
 
+import { updateCursorOffset } from '#/cursor';
 import { isPackageSortEnabled } from '#/options';
 import {
   type ParserAstNode,
@@ -1079,12 +1080,37 @@ export async function preprocessPackageJson(
     if (!isJsonObject(packageJsonWithSourceLiterals)) {
       return sourceText;
     }
-    return (
-      serializeJsonValue(
-        sortPackageJsonObject(packageJsonWithSourceLiterals),
-        fieldNameSourceTexts,
-      ) ?? sourceText
+    const sortedText = serializeJsonValue(
+      sortPackageJsonObject(packageJsonWithSourceLiterals),
+      fieldNameSourceTexts,
     );
+
+    if (sortedText === null || sortedText === sourceText) {
+      return sourceText;
+    }
+    if (
+      typeof prettierOptions.cursorOffset === 'number' &&
+      prettierOptions.cursorOffset >= 0
+    ) {
+      const sortedAst: unknown = await parser.parse(
+        sortedText,
+        prettierOptions,
+      );
+
+      if (
+        !isParserAstNode(sortedAst) ||
+        !updateCursorOffset(
+          sourceText,
+          sortedText,
+          parserJsonAst,
+          sortedAst,
+          prettierOptions,
+        )
+      ) {
+        return sourceText;
+      }
+    }
+    return sortedText;
   } catch {
     return sourceText;
   }

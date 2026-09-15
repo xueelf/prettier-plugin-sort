@@ -10,6 +10,8 @@ import { preprocessPackageJson } from '#/sort-package';
 import { preprocessTsconfig } from '#/sort-tsconfig';
 import { sortTypeScript } from '#/sort-typescript';
 
+const IS_RANGE_FORMATTING = Symbol('isRangeFormatting');
+
 type ParserPreprocessTransform = (
   sourceText: string,
   prettierOptions: ParserOptions,
@@ -23,11 +25,23 @@ function wrapParserPreprocess(
 ): Parser {
   return {
     ...parser,
-    async preprocess(sourceText, prettierOptions) {
+    async preprocess(
+      sourceText,
+      prettierOptions: ParserOptions & { [IS_RANGE_FORMATTING]?: boolean },
+    ) {
       let transformedText = sourceText;
 
       if (parser.preprocess) {
         transformedText = await parser.preprocess(sourceText, prettierOptions);
+      }
+      // 选区会脱离原文件上下文再次解析，标记需随 options 保留到第二次预处理。
+      if (
+        prettierOptions[IS_RANGE_FORMATTING] ||
+        prettierOptions.rangeStart > 0 ||
+        prettierOptions.rangeEnd < sourceText.length
+      ) {
+        prettierOptions[IS_RANGE_FORMATTING] = true;
+        return transformedText;
       }
       return preprocessTransform(transformedText, prettierOptions, parser);
     },
