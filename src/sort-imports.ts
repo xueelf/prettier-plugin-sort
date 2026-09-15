@@ -240,7 +240,7 @@ function findLeadingCommentsStart(
   statementStart: number,
   sortedComments: readonly ParserAstCommentWithTextRange[],
   prettierFilePragmaComment: ParserAstComment | null,
-): number {
+): number | null {
   let attachedTextStart = statementStart;
 
   for (
@@ -272,9 +272,15 @@ function findLeadingCommentsStart(
     );
     const lineBreakCount =
       textBetweenCommentAndImport.match(/\n/g)?.length ?? 0;
+    const isEslintNextLine = isEslintNextLineComment(comment);
+
+    // 同行前置指令控制下一行，不能随当前 import 移动，也不能重排其后的目标。
+    if (isEslintNextLine && lineBreakCount === 0) {
+      return null;
+    }
     const isEslintNextLineCommentAttached =
       attachedTextStart === statementStart &&
-      isEslintNextLineComment(comment) &&
+      isEslintNextLine &&
       textBetweenCommentAndImport.trim() === '' &&
       lineBreakCount === 1;
 
@@ -1021,15 +1027,27 @@ function renderSortedImportSegment(
       applyTypeImportStyle(importDeclaration, sortOptions.esmImportTypeStyle),
   );
   const unlistedGroupRank = sortOptions.esmImportGroups.length;
+  const sortRegionByRequest = new Map<string, number>();
   const rankedImportDeclarations = styledImportDeclarations.map(
-    (importDeclaration, originalIndex) => ({
-      importDeclaration,
-      importGroup: classifyImportGroup(
-        importDeclaration.moduleSpecifier,
-        pathPatterns,
-      ),
-      originalIndex,
-    }),
+    (importDeclaration, originalIndex) => {
+      const importRequestKey = getImportRequestKey(importDeclaration);
+      const regionOffset = importDeclaration.isMergeBoundary ? 1 : 0;
+      const sortRegion =
+        (sortRegionByRequest.get(importRequestKey) ?? 0) + regionOffset;
+
+      // 带注释的声明独占一个区域，排序也不能跨过同源合并边界。
+      sortRegionByRequest.set(importRequestKey, sortRegion + regionOffset);
+
+      return {
+        importDeclaration,
+        importGroup: classifyImportGroup(
+          importDeclaration.moduleSpecifier,
+          pathPatterns,
+        ),
+        sortRegion,
+        originalIndex,
+      };
+    },
   );
 
   rankedImportDeclarations.sort((left, right) => {
@@ -1049,6 +1067,11 @@ function renderSortedImportSegment(
 
     if (moduleSpecifierDifference !== 0) {
       return moduleSpecifierDifference;
+    }
+    const sortRegionDifference = left.sortRegion - right.sortRegion;
+
+    if (sortRegionDifference !== 0) {
+      return sortRegionDifference;
     }
     if (
       left.importDeclaration.isTypeOnly !== right.importDeclaration.isTypeOnly
@@ -1312,6 +1335,10 @@ export function buildImportSortingEdits(
       sortedComments,
       prettierFilePragmaComment,
     );
+
+    if (leadingCommentsStart === null) {
+      return [];
+    }
     const trailingComments = getTrailingComments(
       sourceText,
       declarationRange.end,
