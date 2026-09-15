@@ -1,5 +1,6 @@
 import { type Parser, type ParserOptions } from 'prettier';
 
+import { updateCursorOffset } from '#/cursor';
 import { resolveTsconfigOptions } from '#/options';
 import {
   type ParserAstCommentWithTextRange,
@@ -413,8 +414,22 @@ export async function preprocessTsconfig(
     if (editedSourceText === null) {
       return sourceText;
     }
-    await parser.parse(editedSourceText, prettierOptions);
+    const sortedAst = (await parser.parse(
+      editedSourceText,
+      prettierOptions,
+    )) as ParserAstNode;
 
+    if (
+      !updateCursorOffset(
+        sourceText,
+        editedSourceText,
+        parserAst,
+        sortedAst,
+        prettierOptions,
+      )
+    ) {
+      return sourceText;
+    }
     return editedSourceText;
   } catch {
     return sourceText;

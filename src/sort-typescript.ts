@@ -1,5 +1,6 @@
 import { type Parser, type ParserOptions } from 'prettier';
 
+import { updateCursorOffset } from '#/cursor';
 import { resolveEsmOptions } from '#/options';
 import {
   type ParserAstNode,
@@ -220,7 +221,22 @@ export async function sortTypeScript(
     return sourceText;
   }
   try {
-    await parser.parse(sortedText, prettierOptions);
+    const sortedAst = (await parser.parse(
+      sortedText,
+      prettierOptions,
+    )) as ParserAstNode;
+
+    if (
+      !updateCursorOffset(
+        sourceText,
+        sortedText,
+        parserAst,
+        sortedAst,
+        prettierOptions,
+      )
+    ) {
+      return sourceText;
+    }
     return sortedText;
   } catch {
     return sourceText;
