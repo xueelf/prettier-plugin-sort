@@ -11,6 +11,7 @@ import {
   getAstCommentText,
   getAstNodeName,
   getAstNodeTextRange,
+  isParserAstNode,
   isPrettierIgnored,
   isSourceRangeWhitespaceOrComments,
 } from '#/parser-ast';
@@ -394,17 +395,64 @@ function getTrailingComments(
   };
 }
 
+function getImportAttributesKey(
+  importDeclarationNode: ParserAstNode,
+  syntax: string,
+): string | null {
+  const attributeNodes = importDeclarationNode.attributes;
+
+  if (!Array.isArray(attributeNodes)) {
+    return null;
+  }
+  const attributes: [string, string][] = [];
+  const attributeNames = new Set<string>();
+
+  for (const attributeNode of attributeNodes) {
+    if (
+      !isParserAstNode(attributeNode) ||
+      attributeNode.type !== 'ImportAttribute' ||
+      !isParserAstNode(attributeNode.value)
+    ) {
+      return null;
+    }
+    const keyNode = attributeNode.key;
+    const valueNode = attributeNode.value;
+
+    if (
+      !keyNode ||
+      !['Identifier', 'Literal', 'StringLiteral'].includes(keyNode.type) ||
+      (valueNode.type !== 'Literal' && valueNode.type !== 'StringLiteral') ||
+      typeof valueNode.value !== 'string'
+    ) {
+      return null;
+    }
+    const attributeName = getAstNodeName(keyNode);
+
+    if (attributeName === null || attributeNames.has(attributeName)) {
+      return null;
+    }
+    attributeNames.add(attributeName);
+    attributes.push([attributeName, valueNode.value]);
+  }
+  // 只比较 AST 解码后的静态值，保留属性顺序及 with/assert 的语法差异。
+  return JSON.stringify([syntax, attributes]);
+}
+
 function parseImportAttributes(
   sourceText: string,
   importDeclarationNode: ParserAstNode,
-): { attributesText: string | null; isValid: boolean } {
+): {
+  attributesText: string | null;
+  attributesKey: string | null;
+  isValid: boolean;
+} {
   const declarationRange = getAstNodeTextRange(importDeclarationNode);
   const moduleSpecifierRange = getAstNodeTextRange(
     importDeclarationNode.source,
   );
 
   if (!declarationRange || !moduleSpecifierRange) {
-    return { attributesText: null, isValid: false };
+    return { attributesText: null, attributesKey: null, isValid: false };
   }
   const importAttributesText = sourceText
     .slice(moduleSpecifierRange.end, declarationRange.end)
@@ -412,11 +460,19 @@ function parseImportAttributes(
     .trim();
 
   if (importAttributesText === '') {
-    return { attributesText: null, isValid: true };
+    return { attributesText: null, attributesKey: null, isValid: true };
   }
+  const attributeSyntax = /^(with|assert)\s*\{[\s\S]*\}$/.exec(
+    importAttributesText,
+  )?.[1];
+  const attributesKey = attributeSyntax
+    ? getImportAttributesKey(importDeclarationNode, attributeSyntax)
+    : null;
+
   return {
     attributesText: importAttributesText,
-    isValid: /^(?:with|assert)\s*\{[\s\S]*\}$/.test(importAttributesText),
+    attributesKey,
+    isValid: attributesKey !== null,
   };
 }
 
@@ -436,6 +492,7 @@ interface ParsedImportDeclaration {
   namespaceBinding: string | null;
   namedSpecifiers: ParsedImportSpecifier[] | null;
   importAttributes: string | null;
+  importAttributesKey: string | null;
   verbatimDeclaration: string | null;
   leadingCommentsText: string;
   trailingCommentsText: string;
@@ -584,6 +641,7 @@ function parseImportDeclaration(
     namespaceBinding,
     namedSpecifiers: parsedNamedSpecifiers,
     importAttributes: parsedImportAttributes.attributesText,
+    importAttributesKey: parsedImportAttributes.attributesKey,
     verbatimDeclaration,
     leadingCommentsText,
     trailingCommentsText,
@@ -701,7 +759,7 @@ interface ImportBindingCounts {
 function getImportRequestKey(
   importDeclaration: ParsedImportDeclaration,
 ): string {
-  return `${importDeclaration.moduleSpecifier}\0${importDeclaration.importAttributes ?? ''}`;
+  return `${importDeclaration.moduleSpecifier}\0${importDeclaration.importAttributesKey ?? importDeclaration.importAttributes ?? ''}`;
 }
 
 function isImportDeclarationMergeSafe(
@@ -716,8 +774,8 @@ function isImportDeclarationMergeSafe(
     candidateImportDeclaration.isSideEffectOnly ||
     targetImportDeclaration.moduleSpecifier !==
       candidateImportDeclaration.moduleSpecifier ||
-    targetImportDeclaration.importAttributes !==
-      candidateImportDeclaration.importAttributes ||
+    targetImportDeclaration.importAttributesKey !==
+      candidateImportDeclaration.importAttributesKey ||
     targetImportDeclaration.isMergeBoundary ||
     candidateImportDeclaration.isMergeBoundary
   ) {
@@ -784,6 +842,7 @@ function mergeImportDeclarations(
       candidateImportDeclaration.namespaceBinding,
     namedSpecifiers,
     importAttributes: targetImportDeclaration.importAttributes,
+    importAttributesKey: targetImportDeclaration.importAttributesKey,
     verbatimDeclaration: null,
     leadingCommentsText: targetImportDeclaration.leadingCommentsText,
     trailingCommentsText: '',
