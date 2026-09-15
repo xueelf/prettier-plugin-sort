@@ -83,6 +83,59 @@ describe('sort package.json', () => {
     expect(Object.keys(sortedPackageJson.dependencies)).toEqual(['a_b', 'a-b']);
   });
 
+  test.each(['json', 'json-stringify'] as const)(
+    'sorts numeric field names without losing their source spelling with %s',
+    async parser => {
+      const sourceText = String.raw`{"2":true,"10":false,"dependencies":{"2":"two","\u0031\u0030":"ten"},"name":"pkg","$schema":"schema"}`;
+      const expectedText = String.raw`{
+  "$schema": "schema",
+  "name": "pkg",
+  "dependencies": {
+    "\u0031\u0030": "ten",
+    "2": "two"
+  },
+  "10": false,
+  "2": true
+}
+`;
+      const formattedText = await formatPackageJsonWithSortPlugin(sourceText, {
+        parser,
+        printWidth: 40,
+      });
+
+      expect(formattedText).toBe(expectedText);
+      expect(
+        await formatPackageJsonWithSortPlugin(formattedText, {
+          parser,
+          printWidth: 40,
+        }),
+      ).toBe(expectedText);
+    },
+  );
+
+  test('preserves numeric key order in unsorted nested objects', async () => {
+    const sourceText = String.raw`{"metadata":{"z":{"\u0031\u0030":1e2,"2":-0},"10":true,"2":false,"items":[{"10":null,"2":true}]},"name":"pkg"}`;
+
+    expect(await formatPackageJsonWithSortPlugin(sourceText)).toBe(String.raw`{
+  "name": "pkg",
+  "metadata": {
+    "z": {
+      "\u0031\u0030": 1e2,
+      "2": -0
+    },
+    "10": true,
+    "2": false,
+    "items": [
+      {
+        "10": null,
+        "2": true
+      }
+    ]
+  }
+}
+`);
+  });
+
   test('sorts nested package metadata', async () => {
     const sortedPackageJson = await sortPackageJson({
       workspaces: {
