@@ -414,6 +414,64 @@ describe('sort imports — edge cases', () => {
     expect(await formatTypeScriptWithSortPlugin(sourceText)).toBe(sourceText);
   });
 
+  test.each([
+    'typescript',
+    'babel',
+    'babel-ts',
+    'babel-flow',
+    'flow',
+    'acorn',
+    'espree',
+    'meriyah',
+  ])(
+    'merges differently formatted attributes with the %s parser',
+    async parser => {
+      const sourceText = [
+        'import data from "./x.json" with{type:"json"};',
+        "import * as json from './x.json' with { type: 'json' };",
+        '',
+      ].join('\n');
+      const formattedText = await formatTypeScriptWithSortPlugin(sourceText, {
+        parser,
+      });
+
+      expect(formattedText).toBe(
+        "import data, * as json from './x.json' with { type: 'json' };\n",
+      );
+      expect(
+        await formatTypeScriptWithSortPlugin(formattedText, { parser }),
+      ).toBe(formattedText);
+    },
+  );
+
+  test.each(['with', 'assert'])(
+    'compares decoded %s attributes while preserving the original literals',
+    async syntax => {
+      const sourceText = [
+        `import data from './x.json' ${syntax} { 't\\u0079pe': 'j\\u0073on' };`,
+        `import * as json from './x.json' ${syntax} { type: 'json' };`,
+        '',
+      ].join('\n');
+      const expectedText = `import data, * as json from './x.json' ${syntax} { 't\\u0079pe': 'j\\u0073on' };\n`;
+      const formattedText = await formatTypeScriptWithSortPlugin(sourceText);
+
+      expect(formattedText).toBe(expectedText);
+      expect(await formatTypeScriptWithSortPlugin(formattedText)).toBe(
+        formattedText,
+      );
+    },
+  );
+
+  test('does not merge requests with a different attribute order', async () => {
+    const sourceText = [
+      "import data from './x.json' with { type: 'json', mode: 'strict' };",
+      "import * as json from './x.json' with { mode: 'strict', type: 'json' };",
+      '',
+    ].join('\n');
+
+    expect(await formatTypeScriptWithSortPlugin(sourceText)).toBe(sourceText);
+  });
+
   test('is idempotent: already-sorted source text stays unchanged', async () => {
     const sourceText = [
       "import { readFile } from 'node:fs/promises';",
