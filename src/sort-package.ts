@@ -518,14 +518,12 @@ function sortEslintConfigValue(fieldValue: JsonValue): JsonValue {
 }
 
 function sortPrettierConfigObject(prettierConfig: JsonObject): JsonObject {
-  const keyOrder = Object.keys(prettierConfig)
-    .filter(key => key !== 'overrides')
-    .sort(compareStringsCaseSensitive);
-
-  if (Object.hasOwn(prettierConfig, 'overrides')) {
-    keyOrder.push('overrides');
-  }
-  const sortedConfig = sortJsonObjectByKeyOrder(prettierConfig, keyOrder);
+  const sortedConfig = sortJsonObject(
+    prettierConfig,
+    (leftKey, rightKey) =>
+      Number(leftKey === 'overrides') - Number(rightKey === 'overrides') ||
+      compareStringsCaseSensitive(leftKey, rightKey),
+  );
 
   if (Array.isArray(sortedConfig.overrides)) {
     sortedConfig.overrides = sortedConfig.overrides.map(override => {
@@ -708,9 +706,10 @@ function sortScriptsValue(
     }
     return scriptName;
   });
+  const uniqueScriptNames = [...new Set(normalizedScriptNames)];
   const orderedBaseScriptNames = hasSequentialScript(packageJson)
-    ? [...new Set(normalizedScriptNames)]
-    : sortScriptNames(normalizedScriptNames);
+    ? uniqueScriptNames
+    : sortScriptNames(uniqueScriptNames);
   const orderedScriptNames = orderedBaseScriptNames.flatMap(baseScriptName =>
     baseScriptNames.has(baseScriptName)
       ? [`pre${baseScriptName}`, baseScriptName, `post${baseScriptName}`]

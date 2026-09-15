@@ -136,6 +136,40 @@ describe('sort package.json', () => {
 `);
   });
 
+  test('preserves sequential script groups while arranging lifecycle hooks', async () => {
+    const sourceText = `{
+  "devDependencies": { "npm-run-all": "^4.1.5" },
+  "scripts": {
+    "postbuild": "done",
+    "test": "run-s task:*",
+    "task:z": "last",
+    "task:a": "first",
+    "build": "compile",
+    "prebuild": "clean"
+  }
+}`;
+    const expectedText = `{
+  "scripts": {
+    "prebuild": "clean",
+    "build": "compile",
+    "postbuild": "done",
+    "test": "run-s task:*",
+    "task:z": "last",
+    "task:a": "first"
+  },
+  "devDependencies": {
+    "npm-run-all": "^4.1.5"
+  }
+}
+`;
+    const formattedText = await formatPackageJsonWithSortPlugin(sourceText);
+
+    expect(formattedText).toBe(expectedText);
+    expect(await formatPackageJsonWithSortPlugin(formattedText)).toBe(
+      expectedText,
+    );
+  });
+
   test('sorts nested package metadata', async () => {
     const sortedPackageJson = await sortPackageJson({
       workspaces: {
