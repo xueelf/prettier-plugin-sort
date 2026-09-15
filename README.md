@@ -30,7 +30,7 @@ import App from './App';
 
 ## Install
 
-Requires Prettier 3.9 or newer.
+Requires Prettier 3.x, version 3.9 or later.
 
 ```shell
 npm i -D prettier prettier-plugin-sort
@@ -93,6 +93,8 @@ Under [`verbatimModuleSyntax`](https://www.typescriptlang.org/tsconfig/verbatimM
 With `esmImportMerge` enabled, imports from the same module are merged when safe.
 
 Imports are not merged when their import attributes differ, comments cannot move safely, or default and namespace bindings conflict. Side-effect imports always remain separate.
+
+An import with an attached comment keeps its position relative to surrounding declarations from the same module, preserving the merge boundary after sorting.
 
 ## Export sorting
 
@@ -261,6 +263,10 @@ The plugin only handles ES module syntax. It does not modify CommonJS `require()
 `package.json` sorting supports the `json` and `json-stringify` parsers and applies only to files named `package.json`.
 
 `tsconfig.json` sorting supports the `json` parser. The file must be named `tsconfig.json` or `tsconfig.*.json`.
+
+Range formatting in JavaScript, TypeScript, Flow, or JSON files applies Prettier's layout rules and preserves the original order. For embedded code, the host parser determines the range. For example, Vue may expand a selection to the entire `<script>` block, which still participates in sorting.
+
+With `formatWithCursor()`, the cursor follows the corresponding source content. If its position after sorting cannot be determined reliably, the plugin preserves the original order and continues with Prettier's formatting.
 
 ## TypeScript configuration
 

@@ -30,7 +30,7 @@ import App from './App';
 
 ## 安装
 
-要求 Prettier 3.9 或更高版本。
+要求 Prettier 3.9 及以上的 3.x 版本。
 
 ```shell
 npm i -D prettier prettier-plugin-sort
@@ -93,6 +93,8 @@ npm i -D prettier prettier-plugin-sort
 启用 `esmImportMerge` 后，同一模块的 `import` 会在安全的前提下合并。
 
 `import` 属性不同、注释无法安全移动，或默认导入与命名空间导入发生冲突时，都不会合并。副作用 `import` 始终保持独立。
+
+带注释的 `import` 会保留与两侧同源声明的相对顺序，避免排序后改变合并边界。
 
 ## `export` 排序
 
@@ -261,6 +263,10 @@ Vue、Markdown 等文件中的 JavaScript 和 TypeScript 的**嵌入式代码**�
 `package.json` 排序支持 `json` 和 `json-stringify` 解析器，只对文件名为 `package.json` 的文件生效。
 
 `tsconfig.json` 排序支持 `json` 解析器，文件名必须是 `tsconfig.json` 或 `tsconfig.*.json`。
+
+直接格式化 JavaScript、TypeScript、Flow 或 JSON 文件的局部选区时，插件只执行 Prettier 排版，保留内容原有顺序。嵌入式代码的范围由宿主解析器决定。例如 Vue 可能将选区扩展为整个 `<script>` 块，该代码块仍会参与排序。
+
+使用 `formatWithCursor()` 时，光标会跟随对应的源码内容。无法明确定位排序后的光标位置时，插件保留原有顺序，继续执行 Prettier 排版。
 
 ## TypeScript 配置
 
