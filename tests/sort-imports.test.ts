@@ -640,6 +640,29 @@ describe('sort imports — edge cases', () => {
     expect(await formatTypeScriptWithSortPlugin(sourceText)).toBe(sourceText);
   });
 
+  test.each([
+    "import Default from 'mod';",
+    "import * as namespace from 'mod';",
+    "import type { Type } from 'mod';",
+  ])(
+    'preserves the comment merge region around %s across repeated formatting',
+    async commentedImport => {
+      const sourceText = [
+        "import { a } from 'mod';",
+        '// keep this declaration separate',
+        commentedImport,
+        "import { b } from 'mod';",
+        '',
+      ].join('\n');
+      const formattedText = await formatTypeScriptWithSortPlugin(sourceText);
+
+      expect(formattedText).toBe(sourceText);
+      expect(await formatTypeScriptWithSortPlugin(formattedText)).toBe(
+        formattedText,
+      );
+    },
+  );
+
   test('scopes conflicting binding counts to each comment merge region', async () => {
     const sourceText = [
       "import First from 'mod';",
@@ -651,9 +674,9 @@ describe('sort imports — edge cases', () => {
     ].join('\n');
     const expectedText = [
       "import First from 'mod';",
-      "import Second, { b } from 'mod';",
       '// keep a separate',
       "import { a } from 'mod';",
+      "import Second, { b } from 'mod';",
       '',
     ].join('\n');
 
@@ -817,9 +840,9 @@ describe('sort imports — edge cases', () => {
 
     expect(firstFormattedText).toBe(
       [
-        "import type { T } from '../y';",
         '// note',
         "import { a, z } from '../y';",
+        "import type { T } from '../y';",
         "import { v } from '../y';",
         '',
       ].join('\n'),
@@ -1227,6 +1250,17 @@ describe('sort imports — edge cases', () => {
     ].join('\n');
 
     expect(await formatTypeScriptWithSortPlugin(sourceText)).toBe(expectedText);
+  });
+
+  test('preserves the target of an eslint next-line directive before a same-line import', async () => {
+    const sourceText = [
+      "/* eslint-disable-next-line no-unused-vars */ import z from 'z';",
+      "import a from 'a';",
+      'const unused = 1;',
+      '',
+    ].join('\n');
+
+    expect(await formatTypeScriptWithSortPlugin(sourceText)).toBe(sourceText);
   });
 
   test('moves a trailing eslint-disable-next-line with the import it controls', async () => {
