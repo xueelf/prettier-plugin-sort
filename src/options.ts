@@ -56,14 +56,9 @@ const DEFAULT_SORT_OPTIONS: Required<SortOptions> = {
   tsconfigSeparation: true,
 };
 
-const VALID_IMPORT_GROUPS: ReadonlySet<string> = new Set<ImportGroup>([
-  'builtin',
-  'external',
-  'internal',
-  'parent',
-  'sibling',
-  'index',
-]);
+const VALID_IMPORT_GROUPS: ReadonlySet<string> = new Set(
+  DEFAULT_SORT_OPTIONS.esmImportGroups,
+);
 
 const VALID_TYPE_IMPORT_STYLES: ReadonlySet<string> = new Set<TypeImportStyle>([
   'separate',
@@ -111,10 +106,10 @@ export function resolveEsmOptions(
     DEFAULT_SORT_OPTIONS.esmImportGroups.filter(
       importGroup => !configuredImportGroups.includes(importGroup),
     );
-  const resolvedImportGroups =
-    configuredImportGroups.length > 0
-      ? [...configuredImportGroups, ...remainingDefaultImportGroups]
-      : [...DEFAULT_SORT_OPTIONS.esmImportGroups];
+  const resolvedImportGroups = [
+    ...configuredImportGroups,
+    ...remainingDefaultImportGroups,
+  ];
   const resolvedTypeImportStyle = isValidTypeImportStyle(
     prettierOptions.esmImportTypeStyle,
   )

@@ -770,8 +770,6 @@ function isImportDeclarationMergeSafe(
   if (
     targetImportDeclaration.verbatimDeclaration !== null ||
     candidateImportDeclaration.verbatimDeclaration !== null ||
-    targetImportDeclaration.isSideEffectOnly ||
-    candidateImportDeclaration.isSideEffectOnly ||
     targetImportDeclaration.moduleSpecifier !==
       candidateImportDeclaration.moduleSpecifier ||
     targetImportDeclaration.importAttributesKey !==
@@ -883,10 +881,7 @@ function mergeCompatibleImports(
       currentBindingCountsByRequest.delete(importRequestKey);
       continue;
     }
-    if (
-      importDeclaration.verbatimDeclaration !== null ||
-      importDeclaration.isSideEffectOnly
-    ) {
+    if (importDeclaration.verbatimDeclaration !== null) {
       continue;
     }
     const bindingCounts = currentBindingCountsByRequest.get(
@@ -1012,11 +1007,7 @@ function applyTypeImportStyle(
         ),
       });
     }
-    if (
-      valueSpecifiers.length > 0 ||
-      importDeclaration.defaultBinding !== null ||
-      importDeclaration.namespaceBinding !== null
-    ) {
+    if (hasValueBinding) {
       let namedValueSpecifiers: ParsedImportSpecifier[] | null = null;
 
       if (valueSpecifiers.length > 0) {
